@@ -121,8 +121,9 @@ func parsePacket(data []byte) {
 
 	packetStore.AddPacket(pktInfo)
 
-	log.Printf("Captured: %s -> %s [%s] %d bytes",
-		srcIP, dstIP, protocol, size)
+	// Comment out verbose logging to reduce CPU usage
+	// log.Printf("Captured: %s -> %s [%s] %d bytes",
+	// 	srcIP, dstIP, protocol, size)
 }
 
 // GetStore returns the global packet store

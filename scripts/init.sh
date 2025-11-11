@@ -97,6 +97,11 @@ ip netns exec appsns pkill dhclient 2>/dev/null || true
 sleep 1
 ip netns exec appsns dhclient veth-app
 
+# Setup DNS for appsns
+echo "Configuring DNS for appsns..."
+mkdir -p /etc/netns/appsns
+echo "nameserver 8.8.8.8" > /etc/netns/appsns/resolv.conf
+
 # Setup monitoring namespace
 echo "Setting up monitoring namespace..."
 ./scripts/monitoring/init.sh
