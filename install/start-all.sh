@@ -24,6 +24,11 @@ if [ ! -f "monitoring/sniffer/sniffer" ]; then
     exit 1
 fi
 
+if [ ! -f "parental/dns-inspector/dns-inspector" ]; then
+    echo "Error: DNS inspector binary not found. Run ./install/build-all.sh first"
+    exit 1
+fi
+
 if [ ! -f "webserver/webserver" ]; then
     echo "Error: Webserver binary not found. Run ./install/build-all.sh first"
     exit 1
@@ -40,8 +45,13 @@ if ! ip netns list | grep -q "monns"; then
     exit 1
 fi
 
+if ! ip netns list | grep -q "kidosns"; then
+    echo "Error: kidosns namespace not found. Run 'sudo ./scripts/init.sh' first"
+    exit 1
+fi
+
 # 1. Start packet sniffer in monitoring namespace
-echo "[1/2] Starting packet sniffer daemon..."
+echo "[1/3] Starting packet sniffer daemon..."
 # Remove any existing XDP program first
 ip netns exec monns ip link set veth-mon xdp off 2>/dev/null || true
 ip netns exec monns "$PROJECT_ROOT/monitoring/sniffer/sniffer" > /tmp/kidos-sniffer.log 2>&1 &
@@ -53,8 +63,25 @@ echo ""
 # Wait a moment for sniffer to initialize
 sleep 2
 
-# 2. Start webserver
-echo "[2/2] Starting web server..."
+# 2. Start DNS inspector in kidos namespace
+echo "[2/3] Starting DNS inspector daemon..."
+# Remove any existing XDP program first (both native and generic)
+ip netns exec kidosns ip link set veth-kidos-app xdp off 2>/dev/null || true
+ip netns exec kidosns ip link set veth-kidos-app xdpgeneric off 2>/dev/null || true
+# Load XDP program in native mode
+ip netns exec kidosns ip link set veth-kidos-app xdp obj "$PROJECT_ROOT/parental/dns-inspector/ebpf/xdp_dns.o" sec xdp
+# Start daemon
+ip netns exec kidosns "$PROJECT_ROOT/parental/dns-inspector/dns-inspector" veth-kidos-app > /tmp/kidos-dns-inspector.log 2>&1 &
+DNS_INSPECTOR_PID=$!
+echo "✓ DNS inspector started (PID: $DNS_INSPECTOR_PID)"
+echo "  Logs: /tmp/kidos-dns-inspector.log"
+echo ""
+
+# Wait a moment for DNS inspector to initialize
+sleep 2
+
+# 3. Start webserver
+echo "[3/3] Starting web server..."
 cd "$PROJECT_ROOT/webserver"
 ./webserver > /tmp/kidos-webserver.log 2>&1 &
 WEBSERVER_PID=$!
@@ -64,6 +91,7 @@ echo ""
 
 # Save PIDs for stop script
 echo "$SNIFFER_PID" > /tmp/kidos-sniffer.pid
+echo "$DNS_INSPECTOR_PID" > /tmp/kidos-dns-inspector.pid
 echo "$WEBSERVER_PID" > /tmp/kidos-webserver.pid
 
 echo "=== Kidos Server v1 Started Successfully ==="
@@ -78,4 +106,5 @@ echo "  sudo ./install/stop-all.sh"
 echo ""
 echo "Process IDs saved:"
 echo "  Sniffer: $SNIFFER_PID"
+echo "  DNS Inspector: $DNS_INSPECTOR_PID"
 echo "  Webserver: $WEBSERVER_PID"

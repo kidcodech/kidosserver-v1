@@ -3,15 +3,19 @@ import './App.css'
 
 function App() {
   const [packets, setPackets] = useState([])
+  const [dnsRequests, setDnsRequests] = useState([])
+  const [activeTab, setActiveTab] = useState('packets')
   const [ws, setWs] = useState(null)
 
   useEffect(() => {
     // Fetch initial data
     fetchPackets()
+    fetchDNSRequests()
 
     // Auto-refresh every second
     const refreshInterval = setInterval(() => {
       fetchPackets()
+      fetchDNSRequests()
     }, 1000)
 
     // Setup WebSocket connection
@@ -56,6 +60,16 @@ function App() {
     }
   }
 
+  const fetchDNSRequests = async () => {
+    try {
+      const response = await fetch('http://localhost:8080/api/dns/requests')
+      const data = await response.json()
+      setDnsRequests(data || [])
+    } catch (error) {
+      console.error('Error fetching DNS requests:', error)
+    }
+  }
+
   const clearPackets = async () => {
     try {
       await fetch('http://localhost:8080/api/packets/clear', { method: 'POST' })
@@ -65,10 +79,24 @@ function App() {
     }
   }
 
+  const clearDNS = async () => {
+    try {
+      await fetch('http://localhost:8080/api/dns/clear', { method: 'POST' })
+      setDnsRequests([])
+    } catch (error) {
+      console.error('Error clearing DNS requests:', error)
+    }
+  }
+
   const formatBytes = (bytes) => {
     if (bytes < 1024) return bytes + ' B'
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+  }
+
+  const formatTimestamp = (timestamp) => {
+    const date = new Date(timestamp)
+    return date.toLocaleString()
   }
 
   return (
@@ -82,83 +110,155 @@ function App() {
         </div>
       </header>
 
-      <div className="controls">
-        <button onClick={fetchPackets} className="btn btn-primary">
-          🔄 Refresh
+      <div className="tabs">
+        <button 
+          className={`tab ${activeTab === 'packets' ? 'active' : ''}`}
+          onClick={() => setActiveTab('packets')}
+        >
+          📊 Packet Statistics
         </button>
-        <button onClick={clearPackets} className="btn btn-danger">
-          🗑️ Clear All
+        <button 
+          className={`tab ${activeTab === 'dns' ? 'active' : ''}`}
+          onClick={() => setActiveTab('dns')}
+        >
+          🌐 DNS Requests
         </button>
       </div>
 
-      <div className="stats-summary">
-        <div className="stat-card">
-          <h3>Total Flows</h3>
-          <p className="stat-value">{packets.length}</p>
-        </div>
-        <div className="stat-card">
-          <h3>Total Packets</h3>
-          <p className="stat-value">{packets.reduce((sum, p) => sum + p.count, 0)}</p>
-        </div>
-        <div className="stat-card">
-          <h3>Total Bytes</h3>
-          <p className="stat-value">{formatBytes(packets.reduce((sum, p) => sum + p.total_size, 0))}</p>
-        </div>
-      </div>
+      {activeTab === 'packets' && (
+        <>
+          <div className="controls">
+            <button onClick={fetchPackets} className="btn btn-primary">
+              🔄 Refresh
+            </button>
+            <button onClick={clearPackets} className="btn btn-danger">
+              🗑️ Clear All
+            </button>
+          </div>
 
-      <div className="packet-table-container">
-        <table className="packet-table">
-          <thead>
-            <tr>
-              <th>Source IP</th>
-              <th>Destination IP</th>
-              <th>Protocol</th>
-              <th>Packet Count ▼</th>
-              <th>Total Size</th>
-            </tr>
-          </thead>
-          <tbody>
-            {packets.length === 0 ? (
-              <tr>
-                <td colSpan="5" className="no-data">No packets captured yet</td>
-              </tr>
-            ) : (
-              [...packets]
-                .sort((a, b) => {
-                  // Primary sort: packet count (descending)
-                  if (b.count !== a.count) {
-                    return b.count - a.count;
-                  }
-                  // Secondary sort: source IP (alphabetically)
-                  if (a.src_ip !== b.src_ip) {
-                    return a.src_ip.localeCompare(b.src_ip);
-                  }
-                  // Tertiary sort: destination IP (alphabetically)
-                  return a.dst_ip.localeCompare(b.dst_ip);
-                })
-                .map((pkt, idx) => (
-                  <tr key={idx}>
-                    <td>
-                      {pkt.src_ip}
-                      {pkt.src_domain && <span className="domain"> ({pkt.src_domain})</span>}
-                    </td>
-                    <td>
-                      {pkt.dst_ip}
-                      {pkt.dst_domain && <span className="domain"> ({pkt.dst_domain})</span>}
-                    </td>
-                    <td>
-                      <span className={`protocol protocol-${pkt.protocol.toLowerCase()}`}>
-                        {pkt.protocol}
-                      </span>
-                    </td>
-                    <td>{pkt.count}</td>
-                    <td>{formatBytes(pkt.total_size)}</td>
+          <div className="stats-summary">
+            <div className="stat-card">
+              <h3>Total Flows</h3>
+              <p className="stat-value">{packets.length}</p>
+            </div>
+            <div className="stat-card">
+              <h3>Total Packets</h3>
+              <p className="stat-value">{packets.reduce((sum, p) => sum + p.count, 0)}</p>
+            </div>
+            <div className="stat-card">
+              <h3>Total Bytes</h3>
+              <p className="stat-value">{formatBytes(packets.reduce((sum, p) => sum + p.total_size, 0))}</p>
+            </div>
+          </div>
+
+          <div className="packet-table-container">
+            <table className="packet-table">
+              <thead>
+                <tr>
+                  <th>Source IP</th>
+                  <th>Destination IP</th>
+                  <th>Protocol</th>
+                  <th>Packet Count ▼</th>
+                  <th>Total Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                {packets.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="no-data">No packets captured yet</td>
                   </tr>
-                ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                ) : (
+                  [...packets]
+                    .sort((a, b) => {
+                      // Primary sort: packet count (descending)
+                      if (b.count !== a.count) {
+                        return b.count - a.count;
+                      }
+                      // Secondary sort: source IP (alphabetically)
+                      if (a.src_ip !== b.src_ip) {
+                        return a.src_ip.localeCompare(b.src_ip);
+                      }
+                      // Tertiary sort: destination IP (alphabetically)
+                      return a.dst_ip.localeCompare(b.dst_ip);
+                    })
+                    .map((pkt, idx) => (
+                      <tr key={idx}>
+                        <td>
+                          {pkt.src_ip}
+                          {pkt.src_domain && <span className="domain"> ({pkt.src_domain})</span>}
+                        </td>
+                        <td>
+                          {pkt.dst_ip}
+                          {pkt.dst_domain && <span className="domain"> ({pkt.dst_domain})</span>}
+                        </td>
+                        <td>
+                          <span className={`protocol protocol-${pkt.protocol.toLowerCase()}`}>
+                            {pkt.protocol}
+                          </span>
+                        </td>
+                        <td>{pkt.count}</td>
+                        <td>{formatBytes(pkt.total_size)}</td>
+                      </tr>
+                    ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'dns' && (
+        <>
+          <div className="controls">
+            <button onClick={fetchDNSRequests} className="btn btn-primary">
+              🔄 Refresh
+            </button>
+            <button onClick={clearDNS} className="btn btn-danger">
+              🗑️ Clear All
+            </button>
+          </div>
+
+          <div className="stats-summary">
+            <div className="stat-card">
+              <h3>Total DNS Requests</h3>
+              <p className="stat-value">{dnsRequests.length}</p>
+            </div>
+          </div>
+
+          <div className="packet-table-container">
+            <table className="packet-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Source IP</th>
+                  <th>Domain</th>
+                  <th>Query Type</th>
+                  <th>Query Class</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dnsRequests.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="no-data">No DNS requests captured yet</td>
+                  </tr>
+                ) : (
+                  [...dnsRequests]
+                    .reverse()
+                    .map((req, idx) => (
+                      <tr key={idx}>
+                        <td>{formatTimestamp(req.timestamp)}</td>
+                        <td>{req.src_ip}</td>
+                        <td className="domain-name">{req.domain}</td>
+                        <td>{req.query_type}</td>
+                        <td>{req.query_class}</td>
+                      </tr>
+                    ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   )
 }

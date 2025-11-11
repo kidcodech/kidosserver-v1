@@ -26,6 +26,15 @@ type PacketAggregate struct {
 	TotalSize uint64 `json:"total_size"`
 }
 
+// DNSRequest represents a DNS query
+type DNSRequest struct {
+	Timestamp  string `json:"timestamp"`
+	SrcIP      string `json:"src_ip"`
+	Domain     string `json:"domain"`
+	QueryType  string `json:"query_type"`
+	QueryClass string `json:"query_class"`
+}
+
 // WebSocketMessage represents a message sent over WebSocket
 type WebSocketMessage struct {
 	Type string          `json:"type"`
@@ -38,11 +47,13 @@ var (
 			return true // Allow all origins for development
 		},
 	}
+
 	clients   = make(map[*websocket.Conn]bool)
 	clientsMu sync.RWMutex
 	broadcast = make(chan []PacketAggregate)
 
-	socketPath = "/tmp/kidos-sniffer.sock"
+	socketPath           = "/tmp/kidos-sniffer.sock"
+	dnsInspectorSockPath = "/tmp/kidos-dns-inspector.sock"
 )
 
 func main() {
@@ -51,6 +62,8 @@ func main() {
 	// API endpoints
 	router.HandleFunc("/api/packets/aggregate", getPacketAggregates).Methods("GET")
 	router.HandleFunc("/api/packets/clear", clearPackets).Methods("POST")
+	router.HandleFunc("/api/dns/requests", getDNSRequests).Methods("GET")
+	router.HandleFunc("/api/dns/clear", clearDNSRequests).Methods("POST")
 	router.HandleFunc("/ws", handleWebSocket)
 
 	// Serve static files from frontend/dist
@@ -90,6 +103,48 @@ func clearPackets(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+// getDNSRequests returns DNS request logs from DNS inspector
+func getDNSRequests(w http.ResponseWriter, r *http.Request) {
+	requests, err := fetchDNSRequests()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch DNS requests: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(requests)
+}
+
+// clearDNSRequests clears all stored DNS requests
+func clearDNSRequests(w http.ResponseWriter, r *http.Request) {
+	// For now, just return success - DNS inspector doesn't support clear yet
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+// fetchDNSRequests fetches DNS request data from DNS inspector via Unix socket
+func fetchDNSRequests() ([]DNSRequest, error) {
+	conn, err := net.Dial("unix", dnsInspectorSockPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to DNS inspector: %w", err)
+	}
+	defer conn.Close()
+
+	// Read response
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("failed to read from DNS inspector")
+	}
+
+	data := scanner.Text()
+	var requests []DNSRequest
+	if err := json.Unmarshal([]byte(data), &requests); err != nil {
+		return nil, fmt.Errorf("failed to parse DNS requests: %w", err)
+	}
+
+	return requests, nil
 }
 
 // fetchPacketsFromSniffer fetches packet data from sniffer via Unix socket

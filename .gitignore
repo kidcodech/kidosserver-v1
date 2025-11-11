@@ -1,9 +1,11 @@
 # eBPF compiled objects
 monitoring/ebpf/*.o
+parental/dns-inspector/*.o
 
 # Go binaries
 monitoring/sniffer/sniffer
 webserver/webserver
+parental/dns-inspector/dns-inspector
 
 # Go dependencies
 go.sum
