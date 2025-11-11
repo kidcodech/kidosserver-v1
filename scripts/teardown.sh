@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Teardown monitoring namespace first
+echo "Tearing down monitoring namespace..."
+./scripts/monitoring/teardown.sh
+
 # Kill dhclient processes
 echo "Stopping DHCP clients..."
 ip netns exec ethns pkill dhclient 2>/dev/null || true

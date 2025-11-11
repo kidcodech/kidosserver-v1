@@ -97,4 +97,8 @@ ip netns exec appsns pkill dhclient 2>/dev/null || true
 sleep 1
 ip netns exec appsns dhclient veth-app
 
+# Setup monitoring namespace
+echo "Setting up monitoring namespace..."
+./scripts/monitoring/init.sh
+
 echo "Setup complete!"
