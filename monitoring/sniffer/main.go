@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 )
 
 var packetStore *store.PacketStore
+var dnsMap sync.Map // IP address -> domain name mapping
 
 func main() {
 	// Initialize packet store
@@ -85,6 +87,13 @@ func parsePacket(data []byte) {
 			protocol = "TCP"
 		case layers.IPProtocolUDP:
 			protocol = "UDP"
+			// Check if this is a DNS response
+			if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+				udp, _ := udpLayer.(*layers.UDP)
+				if udp.SrcPort == 53 {
+					parseDNS(packet)
+				}
+			}
 		case layers.IPProtocolICMPv4:
 			protocol = "ICMP"
 		default:
@@ -100,6 +109,13 @@ func parsePacket(data []byte) {
 			protocol = "TCP"
 		case layers.IPProtocolUDP:
 			protocol = "UDP"
+			// Check if this is a DNS response
+			if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+				udp, _ := udpLayer.(*layers.UDP)
+				if udp.SrcPort == 53 {
+					parseDNS(packet)
+				}
+			}
 		case layers.IPProtocolICMPv6:
 			protocol = "ICMPv6"
 		default:
@@ -126,6 +142,45 @@ func parsePacket(data []byte) {
 	// 	srcIP, dstIP, protocol, size)
 }
 
+func parseDNS(packet gopacket.Packet) {
+	dnsLayer := packet.Layer(layers.LayerTypeDNS)
+	if dnsLayer == nil {
+		return
+	}
+
+	dns, _ := dnsLayer.(*layers.DNS)
+
+	// Only process responses
+	if !dns.QR {
+		return
+	}
+
+	// Extract domain name from questions
+	var domainName string
+	if len(dns.Questions) > 0 {
+		domainName = string(dns.Questions[0].Name)
+	}
+
+	if domainName == "" {
+		return
+	}
+
+	// Extract IP addresses from answers
+	for _, answer := range dns.Answers {
+		if answer.Type == layers.DNSTypeA {
+			// IPv4 address
+			ip := net.IP(answer.IP).String()
+			dnsMap.Store(ip, domainName)
+			log.Printf("DNS: %s -> %s", domainName, ip)
+		} else if answer.Type == layers.DNSTypeAAAA {
+			// IPv6 address
+			ip := net.IP(answer.IP).String()
+			dnsMap.Store(ip, domainName)
+			log.Printf("DNS: %s -> %s", domainName, ip)
+		}
+	}
+}
+
 // GetStore returns the global packet store
 func GetStore() *store.PacketStore {
 	return packetStore
@@ -135,6 +190,8 @@ func GetStore() *store.PacketStore {
 type PacketAggregate struct {
 	SrcIP     string `json:"src_ip"`
 	DstIP     string `json:"dst_ip"`
+	SrcDomain string `json:"src_domain,omitempty"`
+	DstDomain string `json:"dst_domain,omitempty"`
 	Protocol  string `json:"protocol"`
 	Count     int    `json:"count"`
 	TotalSize uint64 `json:"total_size"`
@@ -208,9 +265,23 @@ func aggregatePackets(packets []store.PacketInfo) []PacketAggregate {
 			agg.Count++
 			agg.TotalSize += uint64(pkt.Size)
 		} else {
+			srcIP := pkt.SrcIP.String()
+			dstIP := pkt.DstIP.String()
+
+			// Lookup domain names from DNS map
+			var srcDomain, dstDomain string
+			if val, ok := dnsMap.Load(srcIP); ok {
+				srcDomain = val.(string)
+			}
+			if val, ok := dnsMap.Load(dstIP); ok {
+				dstDomain = val.(string)
+			}
+
 			aggMap[key] = &PacketAggregate{
-				SrcIP:     pkt.SrcIP.String(),
-				DstIP:     pkt.DstIP.String(),
+				SrcIP:     srcIP,
+				DstIP:     dstIP,
+				SrcDomain: srcDomain,
+				DstDomain: dstDomain,
 				Protocol:  pkt.Protocol,
 				Count:     1,
 				TotalSize: uint64(pkt.Size),

@@ -138,8 +138,14 @@ function App() {
                 })
                 .map((pkt, idx) => (
                   <tr key={idx}>
-                    <td>{pkt.src_ip}</td>
-                    <td>{pkt.dst_ip}</td>
+                    <td>
+                      {pkt.src_ip}
+                      {pkt.src_domain && <span className="domain"> ({pkt.src_domain})</span>}
+                    </td>
+                    <td>
+                      {pkt.dst_ip}
+                      {pkt.dst_domain && <span className="domain"> ({pkt.dst_domain})</span>}
+                    </td>
                     <td>
                       <span className={`protocol protocol-${pkt.protocol.toLowerCase()}`}>
                         {pkt.protocol}

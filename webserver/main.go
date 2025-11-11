@@ -19,6 +19,8 @@ import (
 type PacketAggregate struct {
 	SrcIP     string `json:"src_ip"`
 	DstIP     string `json:"dst_ip"`
+	SrcDomain string `json:"src_domain,omitempty"`
+	DstDomain string `json:"dst_domain,omitempty"`
 	Protocol  string `json:"protocol"`
 	Count     int    `json:"count"`
 	TotalSize uint64 `json:"total_size"`
