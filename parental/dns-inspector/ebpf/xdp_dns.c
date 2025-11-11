@@ -48,7 +48,8 @@ int xdp_dns_filter(struct xdp_md *ctx)
         return XDP_PASS;
 
     // DNS query packet detected - redirect to AF_XDP socket
-    __u32 index = ctx->rx_queue_index;
+    // Always use queue 0 for single-queue veth interfaces
+    __u32 index = 0;
     if (bpf_map_lookup_elem(&xsks_map, &index))
         return bpf_redirect_map(&xsks_map, index, 0);
 

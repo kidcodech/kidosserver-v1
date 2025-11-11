@@ -4,6 +4,7 @@ import './App.css'
 function App() {
   const [packets, setPackets] = useState([])
   const [dnsRequests, setDnsRequests] = useState([])
+  const [blockedDomains, setBlockedDomains] = useState([])
   const [activeTab, setActiveTab] = useState('packets')
   const [ws, setWs] = useState(null)
 
@@ -11,15 +12,17 @@ function App() {
     // Fetch initial data
     fetchPackets()
     fetchDNSRequests()
+    fetchBlockedDomains()
 
     // Auto-refresh every second
     const refreshInterval = setInterval(() => {
       fetchPackets()
       fetchDNSRequests()
+      fetchBlockedDomains()
     }, 1000)
 
     // Setup WebSocket connection
-    const websocket = new WebSocket('ws://localhost:8080/ws')
+    const websocket = new WebSocket(`ws://${window.location.host}/ws`)
     
     websocket.onopen = () => {
       console.log('WebSocket connected')
@@ -28,7 +31,7 @@ function App() {
     websocket.onmessage = (event) => {
       const message = JSON.parse(event.data)
       if (message.type === 'packet_stats') {
-        setPackets(JSON.parse(message.data))
+        setPackets(message.data)
       }
     }
 
@@ -52,7 +55,7 @@ function App() {
 
   const fetchPackets = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/packets/aggregate')
+      const response = await fetch('/api/packets/aggregate')
       const data = await response.json()
       setPackets(data || [])
     } catch (error) {
@@ -62,7 +65,7 @@ function App() {
 
   const fetchDNSRequests = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/dns/requests')
+      const response = await fetch('/api/dns/requests')
       const data = await response.json()
       setDnsRequests(data || [])
     } catch (error) {
@@ -70,18 +73,54 @@ function App() {
     }
   }
 
+  const fetchBlockedDomains = async () => {
+    try {
+      const response = await fetch('/api/dns/blocked')
+      const data = await response.json()
+      setBlockedDomains(data || [])
+    } catch (error) {
+      console.error('Error fetching blocked domains:', error)
+    }
+  }
+
+  const blockDomain = async (domain) => {
+    try {
+      await fetch('/api/dns/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain })
+      })
+      fetchBlockedDomains()
+    } catch (error) {
+      console.error('Error blocking domain:', error)
+    }
+  }
+
+  const unblockDomain = async (domain) => {
+    try {
+      await fetch('/api/dns/unblock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain })
+      })
+      fetchBlockedDomains()
+    } catch (error) {
+      console.error('Error unblocking domain:', error)
+    }
+  }
+
   const clearPackets = async () => {
     try {
-      await fetch('http://localhost:8080/api/packets/clear', { method: 'POST' })
+      await fetch('/api/packets/clear', { method: 'POST' })
       setPackets([])
     } catch (error) {
       console.error('Error clearing packets:', error)
     }
   }
 
-  const clearDNS = async () => {
+  const clearDNSRequests = async () => {
     try {
-      await fetch('http://localhost:8080/api/dns/clear', { method: 'POST' })
+      await fetch('/api/dns/clear', { method: 'POST' })
       setDnsRequests([])
     } catch (error) {
       console.error('Error clearing DNS requests:', error)
@@ -122,6 +161,12 @@ function App() {
           onClick={() => setActiveTab('dns')}
         >
           🌐 DNS Requests
+        </button>
+        <button 
+          className={`tab ${activeTab === 'blocked' ? 'active' : ''}`}
+          onClick={() => setActiveTab('blocked')}
+        >
+          🚫 Blocked Domains
         </button>
       </div>
 
@@ -213,7 +258,7 @@ function App() {
             <button onClick={fetchDNSRequests} className="btn btn-primary">
               🔄 Refresh
             </button>
-            <button onClick={clearDNS} className="btn btn-danger">
+            <button onClick={clearDNSRequests} className="btn btn-danger">
               🗑️ Clear All
             </button>
           </div>
@@ -234,12 +279,13 @@ function App() {
                   <th>Domain</th>
                   <th>Query Type</th>
                   <th>Query Class</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {dnsRequests.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="no-data">No DNS requests captured yet</td>
+                    <td colSpan="6" className="no-data">No DNS requests captured yet</td>
                   </tr>
                 ) : (
                   [...dnsRequests]
@@ -251,8 +297,66 @@ function App() {
                         <td className="domain-name">{req.domain}</td>
                         <td>{req.query_type}</td>
                         <td>{req.query_class}</td>
+                        <td>
+                          <button 
+                            onClick={() => blockDomain(req.domain)} 
+                            className="btn btn-small btn-danger"
+                            disabled={blockedDomains.includes(req.domain)}
+                          >
+                            {blockedDomains.includes(req.domain) ? '🚫 Blocked' : '🚫 Block'}
+                          </button>
+                        </td>
                       </tr>
                     ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'blocked' && (
+        <>
+          <div className="controls">
+            <button onClick={fetchBlockedDomains} className="btn btn-primary">
+              🔄 Refresh
+            </button>
+          </div>
+
+          <div className="stats-summary">
+            <div className="stat-card">
+              <h3>Total Blocked Domains</h3>
+              <p className="stat-value">{blockedDomains.length}</p>
+            </div>
+          </div>
+
+          <div className="packet-table-container">
+            <table className="packet-table">
+              <thead>
+                <tr>
+                  <th>Domain</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {blockedDomains.length === 0 ? (
+                  <tr>
+                    <td colSpan="2" className="no-data">No domains blocked yet</td>
+                  </tr>
+                ) : (
+                  blockedDomains.map((domain, idx) => (
+                    <tr key={idx}>
+                      <td className="domain-name">{domain}</td>
+                      <td>
+                        <button 
+                          onClick={() => unblockDomain(domain)} 
+                          className="btn btn-small btn-primary"
+                        >
+                          ✅ Unblock
+                        </button>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>

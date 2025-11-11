@@ -18,6 +18,11 @@ echo "=== Starting Kidos Server v1 ==="
 echo "Project root: $PROJECT_ROOT"
 echo ""
 
+# First, stop any running instances
+echo "Stopping any running instances..."
+"$PROJECT_ROOT/install/stop-all.sh" 2>/dev/null || true
+echo ""
+
 # Check if binaries exist
 if [ ! -f "monitoring/sniffer/sniffer" ]; then
     echo "Error: Sniffer binary not found. Run ./install/build-all.sh first"
@@ -80,14 +85,17 @@ echo ""
 # Wait a moment for DNS inspector to initialize
 sleep 2
 
-# 3. Start webserver
-echo "[3/3] Starting web server..."
+# 3. Start webserver in kidosns namespace (so it can listen on br1 IP)
+echo "[3/3] Starting web server in kidosns namespace..."
 cd "$PROJECT_ROOT/webserver"
-./webserver > /tmp/kidos-webserver.log 2>&1 &
+ip netns exec kidosns ./webserver > /tmp/kidos-webserver.log 2>&1 &
 WEBSERVER_PID=$!
 echo "✓ Webserver started (PID: $WEBSERVER_PID)"
 echo "  Logs: /tmp/kidos-webserver.log"
 echo ""
+
+# Get br1 IP for user information
+BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 
 # Save PIDs for stop script
 echo "$SNIFFER_PID" > /tmp/kidos-sniffer.pid
@@ -96,10 +104,21 @@ echo "$WEBSERVER_PID" > /tmp/kidos-webserver.pid
 
 echo "=== Kidos Server v1 Started Successfully ==="
 echo ""
-echo "Access the monitoring dashboard at: http://localhost:8080"
+echo "Access the monitoring dashboard at:"
+echo "  http://localhost:8080"
+if [ -n "$BR1_IP" ]; then
+    echo "  http://$BR1_IP:8080 (from within kidosns)"
+fi
+echo ""
+echo "Captive portal for blocked domains:"
+echo "  http://localhost:8080/blocked"
+if [ -n "$BR1_IP" ]; then
+    echo "  http://$BR1_IP:8080/blocked"
+fi
 echo ""
 echo "To generate test traffic:"
 echo "  sudo ip netns exec appsns ping 8.8.8.8"
+echo "  sudo ip netns exec appsns nslookup example.com 8.8.8.8"
 echo ""
 echo "To stop the system:"
 echo "  sudo ./install/stop-all.sh"

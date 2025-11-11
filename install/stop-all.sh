@@ -63,6 +63,31 @@ if [ -f /tmp/kidos-sniffer.pid ]; then
 else
     echo "✓ No sniffer PID file found"
 fi
+
+# Kill any remaining sniffer processes
+REMAINING_SNIFFERS=$(pgrep -f "monitoring/sniffer/sniffer" || true)
+if [ -n "$REMAINING_SNIFFERS" ]; then
+    echo "⚠ Found additional sniffer processes, killing them..."
+    pkill -9 -f "monitoring/sniffer/sniffer"
+    echo "✓ All sniffer processes killed"
+fi
+
+# Kill any remaining dns-inspector processes
+REMAINING_DNS=$(pgrep -f "parental/dns-inspector/dns-inspector" || true)
+if [ -n "$REMAINING_DNS" ]; then
+    echo "⚠ Found additional DNS inspector processes, killing them..."
+    pkill -9 -f "parental/dns-inspector/dns-inspector"
+    echo "✓ All DNS inspector processes killed"
+fi
+
+# Kill any remaining webserver processes
+REMAINING_WEB=$(pgrep -f "webserver/webserver" || true)
+if [ -n "$REMAINING_WEB" ]; then
+    echo "⚠ Found additional webserver processes, killing them..."
+    pkill -9 -f "webserver/webserver"
+    echo "✓ All webserver processes killed"
+fi
+
 echo ""
 
 # Remove XDP programs

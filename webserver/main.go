@@ -64,7 +64,13 @@ func main() {
 	router.HandleFunc("/api/packets/clear", clearPackets).Methods("POST")
 	router.HandleFunc("/api/dns/requests", getDNSRequests).Methods("GET")
 	router.HandleFunc("/api/dns/clear", clearDNSRequests).Methods("POST")
+	router.HandleFunc("/api/dns/block", blockDomain).Methods("POST")
+	router.HandleFunc("/api/dns/unblock", unblockDomain).Methods("POST")
+	router.HandleFunc("/api/dns/blocked", getBlockedDomains).Methods("GET")
 	router.HandleFunc("/ws", handleWebSocket)
+
+	// Captive portal page for blocked domains
+	router.HandleFunc("/blocked", serveBlockedPage).Methods("GET")
 
 	// Serve static files from frontend/dist
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./frontend/dist")))
@@ -107,12 +113,15 @@ func clearPackets(w http.ResponseWriter, r *http.Request) {
 
 // getDNSRequests returns DNS request logs from DNS inspector
 func getDNSRequests(w http.ResponseWriter, r *http.Request) {
+	log.Println("API: getDNSRequests called")
 	requests, err := fetchDNSRequests()
 	if err != nil {
+		log.Printf("ERROR: Failed to fetch DNS requests: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to fetch DNS requests: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("SUCCESS: Returning %d DNS requests", len(requests))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(requests)
 }
@@ -124,13 +133,136 @@ func clearDNSRequests(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
 }
 
-// fetchDNSRequests fetches DNS request data from DNS inspector via Unix socket
-func fetchDNSRequests() ([]DNSRequest, error) {
+// blockDomain blocks a domain via DNS inspector
+func blockDomain(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Domain string `json:"domain"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Domain == "" {
+		http.Error(w, "Domain is required", http.StatusBadRequest)
+		return
+	}
+
+	err := sendDNSInspectorCommand(fmt.Sprintf("BLOCK_DOMAIN %s", req.Domain))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to block domain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "blocked", "domain": req.Domain})
+}
+
+// unblockDomain unblocks a domain via DNS inspector
+func unblockDomain(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Domain string `json:"domain"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Domain == "" {
+		http.Error(w, "Domain is required", http.StatusBadRequest)
+		return
+	}
+
+	err := sendDNSInspectorCommand(fmt.Sprintf("UNBLOCK_DOMAIN %s", req.Domain))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to unblock domain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "unblocked", "domain": req.Domain})
+}
+
+// getBlockedDomains returns list of blocked domains
+func getBlockedDomains(w http.ResponseWriter, r *http.Request) {
+	domains, err := fetchBlockedDomains()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch blocked domains: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(domains)
+}
+
+// serveBlockedPage serves the captive portal page for blocked domains
+func serveBlockedPage(w http.ResponseWriter, r *http.Request) {
+	html := `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Domain Blocked</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 3rem;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 500px;
+        }
+        h1 {
+            color: #e53e3e;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+        p {
+            color: #4a5568;
+            font-size: 1.1rem;
+            line-height: 1.6;
+        }
+        .icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🚫</div>
+        <h1>Domain Blocked</h1>
+        <p>This domain has been blocked by parental controls.</p>
+    </div>
+</body>
+</html>`
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(html))
+}
+
+// fetchBlockedDomains fetches blocked domains list from DNS inspector
+func fetchBlockedDomains() ([]string, error) {
 	conn, err := net.Dial("unix", dnsInspectorSockPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to DNS inspector: %w", err)
 	}
 	defer conn.Close()
+
+	// Send command
+	fmt.Fprintf(conn, "GET_BLOCKED\n")
 
 	// Read response
 	scanner := bufio.NewScanner(conn)
@@ -139,11 +271,68 @@ func fetchDNSRequests() ([]DNSRequest, error) {
 	}
 
 	data := scanner.Text()
+	var domains []string
+	if err := json.Unmarshal([]byte(data), &domains); err != nil {
+		return nil, fmt.Errorf("failed to parse blocked domains: %w", err)
+	}
+
+	return domains, nil
+}
+
+// sendDNSInspectorCommand sends a command to DNS inspector via Unix socket
+func sendDNSInspectorCommand(command string) error {
+	conn, err := net.Dial("unix", dnsInspectorSockPath)
+	if err != nil {
+		return fmt.Errorf("failed to connect to DNS inspector: %w", err)
+	}
+	defer conn.Close()
+
+	// Send command
+	fmt.Fprintf(conn, "%s\n", command)
+
+	// Read response
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		return fmt.Errorf("no response from DNS inspector")
+	}
+
+	response := strings.TrimSpace(scanner.Text())
+	if response != "OK" {
+		return fmt.Errorf("unexpected response: %s", response)
+	}
+
+	return nil
+}
+
+// fetchDNSRequests fetches DNS request data from DNS inspector via Unix socket
+func fetchDNSRequests() ([]DNSRequest, error) {
+	log.Println("Connecting to DNS inspector socket...")
+	conn, err := net.Dial("unix", dnsInspectorSockPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to DNS inspector: %w", err)
+	}
+	defer conn.Close()
+	log.Println("Connected to DNS inspector socket")
+
+	// Send command
+	log.Println("Sending GET_REQUESTS command...")
+	fmt.Fprintf(conn, "GET_REQUESTS\n")
+
+	// Read response
+	log.Println("Waiting for response...")
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("failed to read from DNS inspector")
+	}
+
+	log.Println("Received response, parsing JSON...")
+	data := scanner.Text()
 	var requests []DNSRequest
 	if err := json.Unmarshal([]byte(data), &requests); err != nil {
 		return nil, fmt.Errorf("failed to parse DNS requests: %w", err)
 	}
 
+	log.Printf("Parsed %d DNS requests", len(requests))
 	return requests, nil
 }
 
