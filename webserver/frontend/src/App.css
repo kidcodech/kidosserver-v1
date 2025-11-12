@@ -128,6 +128,41 @@ body {
   background-color: #ef4444;
 }
 
+.btn-success {
+  background-color: #10b981;
+  color: white;
+}
+
+.btn-success:hover {
+  background-color: #059669;
+}
+
+.add-domain-form {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.domain-input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  color: #fff;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.domain-input:focus {
+  border-color: #646cff;
+}
+
+.domain-input::placeholder {
+  color: #666;
+}
+
 .stats-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

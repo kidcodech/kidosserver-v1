@@ -17,76 +17,43 @@ cd "$PROJECT_ROOT"
 echo "=== Stopping Kidos Server v1 ==="
 echo ""
 
-# 1. Stop webserver
+# 1. Stop webserver - kill ALL webserver processes first
 echo "[1/3] Stopping webserver..."
-if [ -f /tmp/kidos-webserver.pid ]; then
-    WEBSERVER_PID=$(cat /tmp/kidos-webserver.pid)
-    if kill -0 "$WEBSERVER_PID" 2>/dev/null; then
-        kill "$WEBSERVER_PID"
-        echo "✓ Webserver stopped (PID: $WEBSERVER_PID)"
-    else
-        echo "✓ Webserver already stopped"
-    fi
-    rm /tmp/kidos-webserver.pid
+WEBSERVER_PIDS=$(pgrep -f "webserver" | grep -v "grep" || true)
+if [ -n "$WEBSERVER_PIDS" ]; then
+    echo "Found webserver processes: $WEBSERVER_PIDS"
+    pkill -9 webserver
+    echo "✓ All webserver processes killed"
 else
-    echo "✓ No webserver PID file found"
+    echo "✓ No webserver processes running"
 fi
+[ -f /tmp/kidos-webserver.pid ] && rm /tmp/kidos-webserver.pid
 echo ""
 
-# 2. Stop DNS inspector
+# 2. Stop DNS inspector - kill ALL dns-inspector processes first
 echo "[2/3] Stopping DNS inspector..."
-if [ -f /tmp/kidos-dns-inspector.pid ]; then
-    DNS_INSPECTOR_PID=$(cat /tmp/kidos-dns-inspector.pid)
-    if kill -0 "$DNS_INSPECTOR_PID" 2>/dev/null; then
-        kill "$DNS_INSPECTOR_PID"
-        echo "✓ DNS inspector stopped (PID: $DNS_INSPECTOR_PID)"
-    else
-        echo "✓ DNS inspector already stopped"
-    fi
-    rm /tmp/kidos-dns-inspector.pid
-else
-    echo "✓ No DNS inspector PID file found"
-fi
-echo ""
-
-# 3. Stop sniffer
-echo "[3/3] Stopping packet sniffer..."
-if [ -f /tmp/kidos-sniffer.pid ]; then
-    SNIFFER_PID=$(cat /tmp/kidos-sniffer.pid)
-    if kill -0 "$SNIFFER_PID" 2>/dev/null; then
-        kill "$SNIFFER_PID"
-        echo "✓ Sniffer stopped (PID: $SNIFFER_PID)"
-    else
-        echo "✓ Sniffer already stopped"
-    fi
-    rm /tmp/kidos-sniffer.pid
-else
-    echo "✓ No sniffer PID file found"
-fi
-
-# Kill any remaining sniffer processes
-REMAINING_SNIFFERS=$(pgrep -f "monitoring/sniffer/sniffer" || true)
-if [ -n "$REMAINING_SNIFFERS" ]; then
-    echo "⚠ Found additional sniffer processes, killing them..."
-    pkill -9 -f "monitoring/sniffer/sniffer"
-    echo "✓ All sniffer processes killed"
-fi
-
-# Kill any remaining dns-inspector processes
-REMAINING_DNS=$(pgrep -f "parental/dns-inspector/dns-inspector" || true)
-if [ -n "$REMAINING_DNS" ]; then
-    echo "⚠ Found additional DNS inspector processes, killing them..."
+DNS_PIDS=$(pgrep -f "parental/dns-inspector/dns-inspector" || true)
+if [ -n "$DNS_PIDS" ]; then
+    echo "Found DNS inspector processes: $DNS_PIDS"
     pkill -9 -f "parental/dns-inspector/dns-inspector"
     echo "✓ All DNS inspector processes killed"
+else
+    echo "✓ No DNS inspector processes running"
 fi
+[ -f /tmp/kidos-dns-inspector.pid ] && rm /tmp/kidos-dns-inspector.pid
+echo ""
 
-# Kill any remaining webserver processes
-REMAINING_WEB=$(pgrep -f "webserver/webserver" || true)
-if [ -n "$REMAINING_WEB" ]; then
-    echo "⚠ Found additional webserver processes, killing them..."
-    pkill -9 -f "webserver/webserver"
-    echo "✓ All webserver processes killed"
+# 3. Stop sniffer - kill ALL sniffer processes first
+echo "[3/3] Stopping packet sniffer..."
+SNIFFER_PIDS=$(pgrep -f "monitoring/sniffer/sniffer" || true)
+if [ -n "$SNIFFER_PIDS" ]; then
+    echo "Found sniffer processes: $SNIFFER_PIDS"
+    pkill -9 -f "monitoring/sniffer/sniffer"
+    echo "✓ All sniffer processes killed"
+else
+    echo "✓ No sniffer processes running"
 fi
+[ -f /tmp/kidos-sniffer.pid ] && rm /tmp/kidos-sniffer.pid
 
 echo ""
 

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -234,6 +235,19 @@ func handleConnection(conn net.Conn) {
 		case "GET_PACKETS":
 			packets := packetStore.GetPackets()
 			aggregates := aggregatePackets(packets)
+
+			// Sort by total_size (primary), then by count (secondary)
+			sort.Slice(aggregates, func(i, j int) bool {
+				if aggregates[i].TotalSize != aggregates[j].TotalSize {
+					return aggregates[i].TotalSize > aggregates[j].TotalSize
+				}
+				return aggregates[i].Count > aggregates[j].Count
+			})
+
+			// Limit to top 50 entries
+			if len(aggregates) > 50 {
+				aggregates = aggregates[:50]
+			}
 
 			data, err := json.Marshal(aggregates)
 			if err != nil {

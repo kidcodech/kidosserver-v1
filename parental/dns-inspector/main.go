@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -30,12 +33,59 @@ type DNSRequest struct {
 }
 
 var (
-	dnsRequests     []DNSRequest
-	dnsMutex        sync.RWMutex
-	blockedDomains  map[string]bool
-	blockedMutex    sync.RWMutex
-	captivePortalIP string
+	dnsRequests        []DNSRequest
+	dnsMutex           sync.RWMutex
+	blockedDomains     map[string]bool
+	blockedMutex       sync.RWMutex
+	captivePortalIP    string
+	blockedDomainsFile = "/tmp/kidos-blocked-domains.json"
 )
+
+func loadBlockedDomains() {
+	data, err := ioutil.ReadFile(blockedDomainsFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("No existing blocked domains file found, starting fresh")
+			return
+		}
+		log.Printf("Error reading blocked domains file: %v", err)
+		return
+	}
+
+	var domains []string
+	if err := json.Unmarshal(data, &domains); err != nil {
+		log.Printf("Error parsing blocked domains file: %v", err)
+		return
+	}
+
+	blockedMutex.Lock()
+	for _, domain := range domains {
+		blockedDomains[domain] = true
+	}
+	blockedMutex.Unlock()
+	log.Printf("✓ Loaded %d blocked domains from file", len(domains))
+}
+
+func saveBlockedDomains() {
+	blockedMutex.RLock()
+	domains := make([]string, 0, len(blockedDomains))
+	for domain := range blockedDomains {
+		domains = append(domains, domain)
+	}
+	blockedMutex.RUnlock()
+
+	data, err := json.MarshalIndent(domains, "", "  ")
+	if err != nil {
+		log.Printf("Error marshaling blocked domains: %v", err)
+		return
+	}
+
+	if err := ioutil.WriteFile(blockedDomainsFile, data, 0644); err != nil {
+		log.Printf("Error writing blocked domains file: %v", err)
+		return
+	}
+	log.Printf("✓ Saved %d blocked domains to file", len(domains))
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -47,6 +97,7 @@ func main() {
 
 	// Initialize blocked domains map
 	blockedDomains = make(map[string]bool)
+	loadBlockedDomains()
 	log.Println("✓ Initialized blocked domains map")
 
 	// Detect br1 IP address for captive portal
@@ -647,6 +698,7 @@ func handleConnection(conn net.Conn) {
 		blockedMutex.Lock()
 		blockedDomains[domain] = true
 		blockedMutex.Unlock()
+		saveBlockedDomains()
 		log.Printf("✓ Blocked domain: %s (total blocked: %d)", domain, len(blockedDomains))
 		fmt.Fprintf(conn, "OK\n")
 
@@ -660,6 +712,7 @@ func handleConnection(conn net.Conn) {
 		delete(blockedDomains, domain)
 		remaining := len(blockedDomains)
 		blockedMutex.Unlock()
+		saveBlockedDomains()
 		log.Printf("✓ Unblocked domain: %s (remaining blocked: %d)", domain, remaining)
 		fmt.Fprintf(conn, "OK\n")
 
@@ -670,6 +723,9 @@ func handleConnection(conn net.Conn) {
 			domains = append(domains, domain)
 		}
 		blockedMutex.RUnlock()
+
+		// Sort domains alphabetically
+		sort.Strings(domains)
 
 		//log.Printf("✓ Returning %d blocked domains", len(domains))
 		fmt.Fprintf(conn, "[")

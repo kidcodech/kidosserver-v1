@@ -81,21 +81,85 @@ ip netns exec kidosns ip link set veth-kidos-app up
 ip netns exec kidosns ip link set br1 up
 ip netns exec appsns ip link set veth-app up
 
-# Run DHCP on bridges
+# Smart IP management: DHCP-then-static with fallback
+IP_CONFIG_FILE="/tmp/kidos-network.conf"
+
+# Run DHCP on ethernet bridge (always needed for upstream connection)
 echo "Requesting IP address via DHCP on ethernet bridge..."
 ip netns exec ethns pkill dhclient 2>/dev/null || true
 sleep 1
 ip netns exec ethns dhclient br0
 
-echo "Requesting IP address via DHCP on kidos bridge..."
+# Smart IP assignment for kidos bridge
+echo "Configuring IP for kidos bridge..."
 ip netns exec kidosns pkill dhclient 2>/dev/null || true
 sleep 1
-ip netns exec kidosns dhclient br1
 
-echo "Requesting IP address via DHCP on apps interface..."
-ip netns exec appsns pkill dhclient 2>/dev/null || true
-sleep 1
-ip netns exec appsns dhclient veth-app
+if [ -f "$IP_CONFIG_FILE" ]; then
+    # Load stored configuration
+    source "$IP_CONFIG_FILE"
+    echo "Found stored IP configuration:"
+    echo "  BR1_IP: $BR1_IP"
+    echo "  VETH_APP_IP: $VETH_APP_IP"
+    
+    # Try to assign static IPs
+    if ip netns exec kidosns ip addr add "$BR1_IP/24" dev br1 2>/dev/null; then
+        echo "✓ Assigned stored IP to br1: $BR1_IP"
+        BR1_SUCCESS=true
+    else
+        echo "⚠ Failed to assign stored IP to br1 (possible conflict), requesting new DHCP lease..."
+        ip netns exec kidosns dhclient br1
+        sleep 2
+        NEW_BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+        if [ -n "$NEW_BR1_IP" ]; then
+            BR1_IP="$NEW_BR1_IP"
+            echo "✓ Got new IP via DHCP for br1: $BR1_IP"
+            BR1_SUCCESS=true
+        fi
+    fi
+    
+    if ip netns exec appsns ip addr add "$VETH_APP_IP/24" dev veth-app 2>/dev/null; then
+        echo "✓ Assigned stored IP to veth-app: $VETH_APP_IP"
+        VETH_SUCCESS=true
+    else
+        echo "⚠ Failed to assign stored IP to veth-app (possible conflict), requesting new DHCP lease..."
+        ip netns exec appsns dhclient veth-app
+        sleep 2
+        NEW_VETH_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+        if [ -n "$NEW_VETH_IP" ]; then
+            VETH_APP_IP="$NEW_VETH_IP"
+            echo "✓ Got new IP via DHCP for veth-app: $VETH_APP_IP"
+            VETH_SUCCESS=true
+        fi
+    fi
+else
+    echo "No stored IP configuration found, requesting DHCP leases..."
+    # First boot - get IPs via DHCP
+    ip netns exec kidosns dhclient br1
+    sleep 2
+    BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    
+    ip netns exec appsns dhclient veth-app
+    sleep 2
+    VETH_APP_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    
+    if [ -n "$BR1_IP" ] && [ -n "$VETH_APP_IP" ]; then
+        echo "✓ Received DHCP leases:"
+        echo "  br1: $BR1_IP"
+        echo "  veth-app: $VETH_APP_IP"
+        BR1_SUCCESS=true
+        VETH_SUCCESS=true
+    fi
+fi
+
+# Store configuration for next boot
+if [ "$BR1_SUCCESS" = true ] && [ "$VETH_SUCCESS" = true ]; then
+    cat > "$IP_CONFIG_FILE" << EOF
+BR1_IP="$BR1_IP"
+VETH_APP_IP="$VETH_APP_IP"
+EOF
+    echo "✓ Saved IP configuration to $IP_CONFIG_FILE"
+fi
 
 # Setup DNS for appsns
 echo "Configuring DNS for appsns..."

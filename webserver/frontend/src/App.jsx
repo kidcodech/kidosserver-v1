@@ -5,6 +5,7 @@ function App() {
   const [packets, setPackets] = useState([])
   const [dnsRequests, setDnsRequests] = useState([])
   const [blockedDomains, setBlockedDomains] = useState([])
+  const [newDomain, setNewDomain] = useState('')
   const [activeTab, setActiveTab] = useState('packets')
   const [ws, setWs] = useState(null)
 
@@ -107,6 +108,17 @@ function App() {
     } catch (error) {
       console.error('Error unblocking domain:', error)
     }
+  }
+
+  const addDomain = async () => {
+    const domain = newDomain.trim()
+    if (!domain) {
+      alert('Please enter a domain name')
+      return
+    }
+    
+    await blockDomain(domain)
+    setNewDomain('')
   }
 
   const clearPackets = async () => {
@@ -318,6 +330,19 @@ function App() {
       {activeTab === 'blocked' && (
         <>
           <div className="controls">
+            <div className="add-domain-form">
+              <input 
+                type="text" 
+                value={newDomain}
+                onChange={(e) => setNewDomain(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && addDomain()}
+                placeholder="Enter domain to block (e.g., example.com)"
+                className="domain-input"
+              />
+              <button onClick={addDomain} className="btn btn-success">
+                ➕ Add Domain
+              </button>
+            </div>
             <button onClick={fetchBlockedDomains} className="btn btn-primary">
               🔄 Refresh
             </button>

@@ -2,9 +2,16 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"strings"
@@ -80,6 +87,39 @@ func main() {
 
 	// Start periodic stats broadcaster
 	go broadcastStats()
+
+	// Generate self-signed certificate for HTTPS captive portal
+	cert, err := generateSelfSignedCert()
+	if err != nil {
+		log.Fatalf("Failed to generate self-signed certificate: %v", err)
+	}
+
+	// Start port 80 redirect server for captive portal
+	go func() {
+		log.Println("Starting HTTP redirect server on :80")
+		http.ListenAndServe(":80", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Redirect all port 80 traffic to captive portal
+			http.Redirect(w, r, "http://192.168.1.6:8080/blocked", http.StatusFound)
+		}))
+	}()
+
+	// Start port 443 HTTPS server for captive portal
+	go func() {
+		log.Println("Starting HTTPS server on :443")
+		server := &http.Server{
+			Addr: ":443",
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Redirect HTTPS traffic to HTTP captive portal
+				http.Redirect(w, r, "http://192.168.1.6:8080/blocked", http.StatusFound)
+			}),
+			TLSConfig: &tls.Config{
+				Certificates: []tls.Certificate{cert},
+			},
+		}
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			log.Printf("HTTPS server error: %v", err)
+		}
+	}()
 
 	log.Println("Starting web server on :8080")
 	if err := http.ListenAndServe(":8080", router); err != nil {
@@ -347,9 +387,16 @@ func fetchPacketsFromSniffer() ([]PacketAggregate, error) {
 	// Send command
 	fmt.Fprintf(conn, "GET_PACKETS\n")
 
-	// Read response
+	// Read response - increase buffer size for large responses
 	scanner := bufio.NewScanner(conn)
+	// Increase buffer to 10MB for large packet aggregates
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
 	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("scanner error: %w", err)
+		}
 		return nil, fmt.Errorf("no response from sniffer")
 	}
 
@@ -474,4 +521,48 @@ func mustMarshal(v interface{}) json.RawMessage {
 		panic(err)
 	}
 	return data
+}
+
+// generateSelfSignedCert creates a self-signed TLS certificate for captive portal
+func generateSelfSignedCert() (tls.Certificate, error) {
+	// Generate private key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	// Create certificate template
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization:       []string{"Kidos Parental Control System"},
+			OrganizationalUnit: []string{"DNS Policy Enforcement"},
+			CommonName:         "BLOCKED BY DNS POLICY",
+			Country:            []string{"XX"},
+			Locality:           []string{"Content Filter"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	// Self-sign the certificate
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	// Encode certificate and key to PEM
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+
+	// Load as tls.Certificate
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	return cert, nil
 }
