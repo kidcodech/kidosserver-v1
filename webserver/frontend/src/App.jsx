@@ -290,7 +290,7 @@ function App() {
           </div>
 
           <div className="packet-table-container">
-            <table className="packet-table">
+            <table className="packet-table dns-table">
               <thead>
                 <tr>
                   <th>Timestamp</th>
