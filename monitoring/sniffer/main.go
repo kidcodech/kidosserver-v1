@@ -171,11 +171,26 @@ func parseDNS(packet gopacket.Packet) {
 		if answer.Type == layers.DNSTypeA {
 			// IPv4 address
 			ip := net.IP(answer.IP).String()
+
+			// Don't map forged DNS responses from captive portal
+			// Blocked domains resolve to 192.168.1.x (captive portal IPs)
+			if strings.HasPrefix(ip, "192.168.1.") {
+				log.Printf("DNS: %s -> %s (captive portal - not mapping)", domainName, ip)
+				continue
+			}
+
 			dnsMap.Store(ip, domainName)
 			log.Printf("DNS: %s -> %s", domainName, ip)
 		} else if answer.Type == layers.DNSTypeAAAA {
 			// IPv6 address
 			ip := net.IP(answer.IP).String()
+
+			// Don't map forged DNS responses from captive portal
+			if strings.HasPrefix(ip, "192.168.1.") {
+				log.Printf("DNS: %s -> %s (captive portal - not mapping)", domainName, ip)
+				continue
+			}
+
 			dnsMap.Store(ip, domainName)
 			log.Printf("DNS: %s -> %s", domainName, ip)
 		}

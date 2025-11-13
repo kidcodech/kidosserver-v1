@@ -358,10 +358,17 @@ func fetchDNSRequests() ([]DNSRequest, error) {
 	log.Println("Sending GET_REQUESTS command...")
 	fmt.Fprintf(conn, "GET_REQUESTS\n")
 
-	// Read response
+	// Read response - increase buffer size for large responses
 	log.Println("Waiting for response...")
 	scanner := bufio.NewScanner(conn)
+	// Increase buffer to 10MB for large DNS request logs
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
 	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("scanner error: %w", err)
+		}
 		return nil, fmt.Errorf("failed to read from DNS inspector")
 	}
 

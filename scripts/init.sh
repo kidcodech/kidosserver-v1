@@ -101,10 +101,16 @@ if [ -f "$IP_CONFIG_FILE" ]; then
     echo "Found stored IP configuration:"
     echo "  BR1_IP: $BR1_IP"
     echo "  VETH_APP_IP: $VETH_APP_IP"
+    echo "  GATEWAY: $GATEWAY"
     
     # Try to assign static IPs
     if ip netns exec kidosns ip addr add "$BR1_IP/24" dev br1 2>/dev/null; then
         echo "✓ Assigned stored IP to br1: $BR1_IP"
+        # Add default gateway
+        if [ -n "$GATEWAY" ]; then
+            ip netns exec kidosns ip route add default via "$GATEWAY" 2>/dev/null && \
+                echo "✓ Added default gateway: $GATEWAY"
+        fi
         BR1_SUCCESS=true
     else
         echo "⚠ Failed to assign stored IP to br1 (possible conflict), requesting new DHCP lease..."
@@ -113,13 +119,21 @@ if [ -f "$IP_CONFIG_FILE" ]; then
         NEW_BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
         if [ -n "$NEW_BR1_IP" ]; then
             BR1_IP="$NEW_BR1_IP"
+            # Capture gateway from DHCP-assigned route
+            GATEWAY=$(ip netns exec kidosns ip route | grep default | awk '{print $3}')
             echo "✓ Got new IP via DHCP for br1: $BR1_IP"
+            echo "✓ Got gateway: $GATEWAY"
             BR1_SUCCESS=true
         fi
     fi
     
     if ip netns exec appsns ip addr add "$VETH_APP_IP/24" dev veth-app 2>/dev/null; then
         echo "✓ Assigned stored IP to veth-app: $VETH_APP_IP"
+        # Add default gateway
+        if [ -n "$GATEWAY" ]; then
+            ip netns exec appsns ip route add default via "$GATEWAY" 2>/dev/null && \
+                echo "✓ Added default gateway for appsns: $GATEWAY"
+        fi
         VETH_SUCCESS=true
     else
         echo "⚠ Failed to assign stored IP to veth-app (possible conflict), requesting new DHCP lease..."
@@ -128,6 +142,11 @@ if [ -f "$IP_CONFIG_FILE" ]; then
         NEW_VETH_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
         if [ -n "$NEW_VETH_IP" ]; then
             VETH_APP_IP="$NEW_VETH_IP"
+            # Add default gateway (DHCP on veth pair might not provide gateway)
+            if [ -n "$GATEWAY" ]; then
+                ip netns exec appsns ip route add default via "$GATEWAY" 2>/dev/null && \
+                    echo "✓ Added default gateway for appsns: $GATEWAY"
+            fi
             echo "✓ Got new IP via DHCP for veth-app: $VETH_APP_IP"
             VETH_SUCCESS=true
         fi
@@ -138,15 +157,24 @@ else
     ip netns exec kidosns dhclient br1
     sleep 2
     BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    # Get gateway from DHCP-assigned route
+    GATEWAY=$(ip netns exec kidosns ip route | grep default | awk '{print $3}')
     
     ip netns exec appsns dhclient veth-app
     sleep 2
     VETH_APP_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
     
+    # Ensure appsns has default gateway (DHCP on veth pair might not provide it)
+    if [ -n "$GATEWAY" ]; then
+        ip netns exec appsns ip route add default via "$GATEWAY" 2>/dev/null && \
+            echo "✓ Added default gateway for appsns: $GATEWAY"
+    fi
+    
     if [ -n "$BR1_IP" ] && [ -n "$VETH_APP_IP" ]; then
         echo "✓ Received DHCP leases:"
         echo "  br1: $BR1_IP"
         echo "  veth-app: $VETH_APP_IP"
+        echo "  gateway: $GATEWAY"
         BR1_SUCCESS=true
         VETH_SUCCESS=true
     fi
@@ -154,9 +182,20 @@ fi
 
 # Store configuration for next boot
 if [ "$BR1_SUCCESS" = true ] && [ "$VETH_SUCCESS" = true ]; then
+    # If gateway is still empty, try to detect it from current routes
+    if [ -z "$GATEWAY" ]; then
+        GATEWAY=$(ip netns exec kidosns ip route | grep default | awk '{print $3}')
+        if [ -z "$GATEWAY" ]; then
+            # Fallback to standard gateway for 192.168.1.0/24 network
+            GATEWAY="192.168.1.1"
+        fi
+        echo "✓ Detected gateway: $GATEWAY"
+    fi
+    
     cat > "$IP_CONFIG_FILE" << EOF
 BR1_IP="$BR1_IP"
 VETH_APP_IP="$VETH_APP_IP"
+GATEWAY="$GATEWAY"
 EOF
     echo "✓ Saved IP configuration to $IP_CONFIG_FILE"
 fi

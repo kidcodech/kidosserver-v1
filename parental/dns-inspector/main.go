@@ -128,11 +128,12 @@ func main() {
 	log.Printf("✓ Found interface %s (index: %d)", ifaceName, iface.Index)
 
 	// Find the xsks_map that's already loaded by the XDP program
-	// We need to iterate through BPF maps to find it
+	// Search from highest ID backwards to get the most recently loaded map
 	var xsksMap *ebpf.Map
 	var mapID ebpf.MapID
 	log.Println("Searching for xsks_map...")
-	for mapID = 1; mapID < 10000; mapID++ {
+	// Start from a high ID and search backwards to find the latest map
+	for mapID = 10000; mapID >= 1; mapID-- {
 		m, err := ebpf.NewMapFromID(mapID)
 		if err != nil {
 			continue
@@ -142,7 +143,6 @@ func main() {
 			m.Close()
 			continue
 		}
-		log.Printf("Checking map ID %d: name=%s, type=%v", mapID, info.Name, info.Type)
 		if info.Name == "xsks_map" && info.Type == ebpf.XSKMap {
 			xsksMap = m
 			log.Printf("✓ Found xsks_map with ID %d (type=%v, name=%s)", mapID, info.Type, info.Name)
@@ -518,7 +518,7 @@ func craftDNSResponse(requestData []byte, captiveIP string) []byte {
 				Name:  dns.Questions[0].Name,
 				Type:  layers.DNSTypeA,
 				Class: layers.DNSClassIN,
-				TTL:   60, // Minimum TTL
+				TTL:   1, // Minimum TTL - 1 second
 				IP:    net.ParseIP(captiveIP).To4(),
 			},
 		}
