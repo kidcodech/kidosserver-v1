@@ -6,34 +6,46 @@
 
 body {
   min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  overflow-x: hidden;
 }
 
 .App {
-  max-width: 1400px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-.header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2rem;
-  padding-bottom: 1rem;
-  border-bottom: 2px solid #646cff;
+  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
 }
 
-.header h1 {
-  font-size: 2.5rem;
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  border-right: 1px solid #2a2a3e;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  height: 100vh;
+  left: 0;
+  top: 0;
+  z-index: 100;
+}
+
+.sidebar-header {
+  padding: 2rem 1.5rem;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.sidebar-header h1 {
+  font-size: 1.75rem;
   font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.75rem;
 }
 
 .status {
-  font-size: 1.2rem;
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 .connected {
@@ -50,40 +62,96 @@ body {
   50% { opacity: 0.5; }
 }
 
-.tabs {
+/* Sidebar Navigation */
+.sidebar-nav {
+  flex: 1;
+  padding: 1rem 0;
   display: flex;
-  gap: 0;
-  margin-bottom: 2rem;
-  border-bottom: 1px solid #2a2a2a;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
-.tab {
-  padding: 1rem 2rem;
-  font-size: 0.95rem;
-  font-weight: 600;
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
   background: transparent;
   border: none;
-  color: #999;
+  color: #9ca3af;
   cursor: pointer;
   transition: all 0.2s ease;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-align: left;
   position: relative;
 }
 
-.tab:hover {
+.nav-item:hover {
+  background: rgba(100, 108, 255, 0.1);
   color: #fff;
-  background: rgba(100, 108, 255, 0.05);
 }
 
-.tab.active {
+.nav-item.active {
+  background: rgba(100, 108, 255, 0.15);
   color: #646cff;
-  background: rgba(100, 108, 255, 0.08);
-  margin-bottom: -1px;
+  border-left: 3px solid #646cff;
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #646cff;
+}
+
+.nav-icon {
+  font-size: 1.25rem;
+  width: 24px;
+  text-align: center;
+}
+
+.nav-text {
+  flex: 1;
+}
+
+/* Main Content */
+.main-content {
+  margin-left: 260px;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 2rem;
+  background: #0f0f1e;
+  min-height: 100vh;
+  width: calc(100% - 260px);
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #646cff;
+}
+
+.header h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
 }
 
 .controls {
   display: flex;
   gap: 1rem;
   margin-bottom: 2rem;
+  width: 100%;
 }
 
 .btn {
@@ -168,6 +236,7 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1.5rem;
   margin-bottom: 2rem;
+  width: 100%;
 }
 
 .stat-card {
@@ -193,21 +262,79 @@ body {
 }
 
 .packet-table-container {
-  overflow-x: auto;
   background: #1a1a1a;
   border-radius: 12px;
   border: 1px solid #333;
+  width: 100%;
+  flex-grow: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .packet-table {
   width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
-  margin: 0 auto;
+  margin: 0;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .packet-table thead {
-  background: #2a2a2a;
+  border-bottom: 2px solid #646cff;
+  display: block;
+  width: 100%;
+}
+
+.packet-table thead tr {
+  display: flex;
+  width: 100%;
+}
+
+.packet-table tbody {
+  display: block;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex-grow: 1;
+}
+
+.packet-table tbody tr {
+  display: flex;
+  width: 100%;
+}
+
+/* Custom scrollbar for tbody only */
+.packet-table tbody::-webkit-scrollbar {
+  width: 10px;
+}
+
+.packet-table tbody::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.packet-table tbody::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+  border: 2px solid #1a1a1a;
+}
+
+.packet-table tbody::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.packet-table thead {
+  border-bottom: 2px solid #646cff;
+  display: block;
+  width: 100%;
+}
+
+.packet-table thead tr {
+  display: flex;
+  width: 100%;
 }
 
 .packet-table th {
@@ -217,6 +344,41 @@ body {
   color: #646cff;
   border-bottom: 2px solid #646cff;
   font-size: 1rem;
+  background: #2a2a2a;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packet-table th:nth-child(1),
+.packet-table td:nth-child(1) {
+  flex: 0 0 25%;
+  min-width: 200px;
+}
+
+.packet-table th:nth-child(2),
+.packet-table td:nth-child(2) {
+  flex: 0 0 25%;
+  min-width: 200px;
+}
+
+.packet-table th:nth-child(3),
+.packet-table td:nth-child(3) {
+  flex: 0 0 15%;
+  min-width: 120px;
+}
+
+.packet-table th:nth-child(4),
+.packet-table td:nth-child(4) {
+  flex: 0 0 15%;
+  min-width: 120px;
+}
+
+.packet-table th:nth-child(5),
+.packet-table td:nth-child(5) {
+  flex: 0 0 20%;
+  min-width: 120px;
 }
 
 .packet-table td {
@@ -226,6 +388,10 @@ body {
   font-size: 0.95rem;
   font-weight: 500;
   text-align: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .domain {
@@ -237,6 +403,28 @@ body {
 .domain-name {
   color: #4ade80;
   font-weight: 600;
+}
+
+.blocked-table td:first-child {
+  text-align: left;
+  padding-left: 2rem;
+}
+
+.blocked-table th:first-child {
+  text-align: left;
+  padding-left: 2rem;
+}
+
+.blocked-table th:nth-child(1),
+.blocked-table td:nth-child(1) {
+  flex: 0 0 70%;
+  min-width: 300px;
+}
+
+.blocked-table th:nth-child(2),
+.blocked-table td:nth-child(2) {
+  flex: 0 0 30%;
+  min-width: 150px;
 }
 
 .packet-table tbody tr:hover {
@@ -284,12 +472,31 @@ body {
 }
 
 @media (max-width: 768px) {
-  .App {
+  .sidebar {
+    width: 80px;
+  }
+
+  .sidebar-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .nav-text {
+    display: none;
+  }
+
+  .nav-item {
+    justify-content: center;
     padding: 1rem;
   }
 
-  .header h1 {
+  .nav-icon {
     font-size: 1.5rem;
+  }
+
+  .main-content {
+    margin-left: 80px;
+    padding: 1rem;
+    width: calc(100% - 80px);
   }
 
   .stats-summary {

@@ -152,35 +152,42 @@ function App() {
 
   return (
     <div className="App">
-      <header className="header">
-        <h1>🔍 Kidos Network Monitor</h1>
-        <div className="status">
-          <span className={ws && ws.readyState === WebSocket.OPEN ? 'connected' : 'disconnected'}>
-            {ws && ws.readyState === WebSocket.OPEN ? '● Live' : '○ Disconnected'}
-          </span>
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <h1>🔍 Kidos</h1>
+          <div className="status">
+            <span className={ws && ws.readyState === WebSocket.OPEN ? 'connected' : 'disconnected'}>
+              {ws && ws.readyState === WebSocket.OPEN ? '● Live' : '○ Offline'}
+            </span>
+          </div>
         </div>
-      </header>
 
-      <div className="tabs">
-        <button 
-          className={`tab ${activeTab === 'packets' ? 'active' : ''}`}
-          onClick={() => setActiveTab('packets')}
-        >
-          📊 Packet Statistics
-        </button>
-        <button 
-          className={`tab ${activeTab === 'dns' ? 'active' : ''}`}
-          onClick={() => setActiveTab('dns')}
-        >
-          🌐 DNS Requests
-        </button>
-        <button 
-          className={`tab ${activeTab === 'blocked' ? 'active' : ''}`}
-          onClick={() => setActiveTab('blocked')}
-        >
-          🚫 Blocked Domains
-        </button>
-      </div>
+        <nav className="sidebar-nav">
+          <button 
+            className={`nav-item ${activeTab === 'packets' ? 'active' : ''}`}
+            onClick={() => setActiveTab('packets')}
+          >
+            <span className="nav-icon">📊</span>
+            <span className="nav-text">Packet Statistics</span>
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'dns' ? 'active' : ''}`}
+            onClick={() => setActiveTab('dns')}
+          >
+            <span className="nav-icon">🌐</span>
+            <span className="nav-text">DNS Requests</span>
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'blocked' ? 'active' : ''}`}
+            onClick={() => setActiveTab('blocked')}
+          >
+            <span className="nav-icon">🚫</span>
+            <span className="nav-text">Blocked Domains</span>
+          </button>
+        </nav>
+      </aside>
+
+      <main className="main-content">
 
       {activeTab === 'packets' && (
         <>
@@ -356,11 +363,11 @@ function App() {
           </div>
 
           <div className="packet-table-container">
-            <table className="packet-table">
+            <table className="packet-table blocked-table">
               <thead>
                 <tr>
-                  <th>Domain</th>
-                  <th>Action</th>
+                  <th style={{width: '80%'}}>Domain</th>
+                  <th style={{width: '20%'}}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -388,6 +395,7 @@ function App() {
           </div>
         </>
       )}
+      </main>
     </div>
   )
 }
