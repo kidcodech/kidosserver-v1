@@ -1,5 +1,148 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
+
+// Helper function to format bytes
+const formatBytes = (bytes) => {
+  if (bytes === 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+function TrafficGraph({ data, onWidthChange }) {
+  const canvasRef = useRef(null)
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const container = containerRef.current
+    if (!canvas || !container) return
+
+    // Set canvas size to match container
+    const containerWidth = container.clientWidth
+    canvas.width = containerWidth
+    canvas.height = 400
+    
+    // Notify parent of width change for history management
+    if (onWidthChange) {
+      onWidthChange(containerWidth)
+    }
+
+    const ctx = canvas.getContext('2d')
+    const width = canvas.width
+    const height = canvas.height
+
+    // Clear canvas
+    ctx.fillStyle = '#0f0f1e'
+    ctx.fillRect(0, 0, width, height)
+
+    if (data.length === 0) {
+      // Show "No data" message
+      ctx.fillStyle = '#666'
+      ctx.font = '16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('Waiting for data... (Graph will appear as traffic flows)', width / 2, height / 2)
+      return
+    }
+
+    console.log('Drawing graph with', data.length, 'data points, latest:', data[data.length - 1])
+
+    // Padding for labels and graph boundaries
+    const leftPadding = 70 // Space for Y-axis labels
+    const rightPadding = 10
+    const topPadding = 20
+    const bottomPadding = 20
+    
+    // Calculate how many data points fit (account for left padding)
+    const graphWidth = width - leftPadding - rightPadding
+    const maxDataPoints = graphWidth
+    const displayData = data.slice(-maxDataPoints)
+
+    // Logarithmic scale: 1 KB/s to 1 Gbps with padding
+    const minBytesPerSec = 1000 // 1 KB/s
+    const maxBytesPerSec = 1000000000 // 1 Gbps (use full 1000 MB instead of 125 MB)
+    const graphHeight = height - (topPadding + bottomPadding)
+    
+    const logScale = (value) => {
+      if (value <= minBytesPerSec) return topPadding
+      const logMin = Math.log10(minBytesPerSec)
+      const logMax = Math.log10(maxBytesPerSec)
+      const logValue = Math.log10(value)
+      return topPadding + ((logValue - logMin) / (logMax - logMin)) * graphHeight
+    }
+
+    // Draw grid lines (logarithmic)
+    ctx.strokeStyle = '#2a2a3e'
+    ctx.lineWidth = 1
+    const gridValues = [
+      { value: 1000, label: '1 KB/s' },
+      { value: 10000, label: '10 KB/s' },
+      { value: 100000, label: '100 KB/s' },
+      { value: 1000000, label: '1 MB/s' },
+      { value: 10000000, label: '10 MB/s' },
+      { value: 100000000, label: '100 MB/s' },
+      { value: 1000000000, label: '1 Gb/s' }
+    ]
+    
+    gridValues.forEach(({ value, label }) => {
+      const y = height - logScale(value)
+      ctx.beginPath()
+      ctx.moveTo(leftPadding, y)
+      ctx.lineTo(width - rightPadding, y)
+      ctx.stroke()
+
+      // Draw labels (aligned to the left)
+      ctx.fillStyle = '#666'
+      ctx.font = '10px monospace'
+      ctx.textAlign = 'right'
+      ctx.fillText(label, leftPadding - 5, y + 3)
+    })
+
+    // Draw graph line
+    ctx.strokeStyle = '#646cff'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+
+    displayData.forEach((value, index) => {
+      // 1-to-1 pixel mapping: one data point per pixel (offset by leftPadding)
+      const x = leftPadding + index
+      const y = height - logScale(value)
+      
+      if (index === 0) {
+        ctx.moveTo(x, y)
+      } else {
+        ctx.lineTo(x, y)
+      }
+    })
+    
+    ctx.stroke()
+
+    // Fill area under curve
+    if (displayData.length > 0) {
+      // Close from the last point's x-coordinate, not the full width
+      ctx.lineTo(leftPadding + displayData.length - 1, height - bottomPadding)
+      ctx.lineTo(leftPadding, height - bottomPadding)
+      ctx.closePath()
+      
+      const gradient = ctx.createLinearGradient(0, 0, 0, height)
+      gradient.addColorStop(0, 'rgba(100, 108, 255, 0.3)')
+      gradient.addColorStop(1, 'rgba(100, 108, 255, 0.05)')
+      ctx.fillStyle = gradient
+      ctx.fill()
+    }
+
+  }, [data])
+
+  return (
+    <div ref={containerRef} style={{ width: '100%', height: '400px' }}>
+      <canvas 
+        ref={canvasRef}
+        style={{ width: '100%', height: '100%', borderRadius: '12px', display: 'block' }}
+      />
+    </div>
+  )
+}
 
 function App() {
   const [packets, setPackets] = useState([])
@@ -8,6 +151,10 @@ function App() {
   const [newDomain, setNewDomain] = useState('')
   const [activeTab, setActiveTab] = useState('packets')
   const [ws, setWs] = useState(null)
+  const [trafficHistory, setTrafficHistory] = useState([])
+  const [lastPacketCount, setLastPacketCount] = useState(0)
+  const [lastUpdateTime, setLastUpdateTime] = useState(Date.now())
+  const [maxHistoryLength, setMaxHistoryLength] = useState(1200) // Default, will be updated by canvas width
 
   useEffect(() => {
     // Fetch initial data
@@ -53,6 +200,42 @@ function App() {
       }
     }
   }, [])
+
+  // Update traffic graph when packets change
+  useEffect(() => {
+    if (packets.length === 0) return
+    
+    const now = Date.now()
+    const timeDelta = (now - lastUpdateTime) / 1000 // seconds
+    
+    if (timeDelta < 0.1) return // Ignore updates faster than 100ms
+    
+    const currentBytesCount = packets.reduce((sum, p) => sum + p.total_size, 0)
+    const bytesDelta = Math.max(0, currentBytesCount - lastPacketCount)
+    
+    // Calculate bytes per second based on actual time elapsed
+    const bytesPerSecond = Math.round(bytesDelta / timeDelta)
+    
+    console.log('Traffic update:', { 
+      currentBytesCount, 
+      lastPacketCount, 
+      bytesDelta,
+      timeDelta: timeDelta.toFixed(2) + 's',
+      bytesPerSecond 
+    })
+    
+    setLastPacketCount(currentBytesCount)
+    setLastUpdateTime(now)
+    
+    setTrafficHistory(prev => {
+      const newHistory = [...prev, bytesPerSecond]
+      // Keep history based on canvas width (maxHistoryLength)
+      if (newHistory.length > maxHistoryLength) {
+        return newHistory.slice(-maxHistoryLength)
+      }
+      return newHistory
+    })
+  }, [packets, maxHistoryLength])
 
   const fetchPackets = async () => {
     try {
@@ -171,6 +354,13 @@ function App() {
             <span className="nav-text">Packet Statistics</span>
           </button>
           <button 
+            className={`nav-item ${activeTab === 'traffic' ? 'active' : ''}`}
+            onClick={() => setActiveTab('traffic')}
+          >
+            <span className="nav-icon">📈</span>
+            <span className="nav-text">Traffic Monitor</span>
+          </button>
+          <button 
             className={`nav-item ${activeTab === 'dns' ? 'active' : ''}`}
             onClick={() => setActiveTab('dns')}
           >
@@ -188,6 +378,48 @@ function App() {
       </aside>
 
       <main className="main-content">
+
+      {activeTab === 'traffic' && (
+        <>
+          <div className="stats-summary">
+            <div className="stat-card">
+              <h3>Current Rate</h3>
+              <p className="stat-value">
+                {trafficHistory.length > 0 ? formatBytes(trafficHistory[trafficHistory.length - 1]) : '0 B'}/s
+              </p>
+            </div>
+            <div className="stat-card">
+              <h3>Peak Rate</h3>
+              <p className="stat-value">
+                {trafficHistory.length > 0 ? formatBytes(Math.max(...trafficHistory)) : '0 B'}/s
+              </p>
+            </div>
+            <div className="stat-card">
+              <h3>Average Rate</h3>
+              <p className="stat-value">
+                {trafficHistory.length > 0 
+                  ? formatBytes(Math.round(trafficHistory.reduce((a, b) => a + b, 0) / trafficHistory.length))
+                  : '0 B'}/s
+              </p>
+            </div>
+            <div className="stat-card">
+              <h3>History</h3>
+              <p className="stat-value">{trafficHistory.length}s</p>
+            </div>
+          </div>
+
+          <div className="traffic-graph-container">
+            <h2 style={{ color: '#646cff', marginBottom: '1rem' }}>Network Traffic Monitor</h2>
+            <p style={{ color: '#888', marginBottom: '1rem', fontSize: '0.9rem' }}>
+              Real-time download rate (bytes/second) - Logarithmic scale, Max: 1 Gbps
+            </p>
+            <TrafficGraph 
+              data={trafficHistory} 
+              onWidthChange={(width) => setMaxHistoryLength(width)}
+            />
+          </div>
+        </>
+      )}
 
       {activeTab === 'packets' && (
         <>

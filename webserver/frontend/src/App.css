@@ -261,6 +261,16 @@ body {
   color: #646cff;
 }
 
+.traffic-graph-container {
+  background: #1a1a1a;
+  border-radius: 12px;
+  border: 1px solid #333;
+  padding: 2rem;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
 .packet-table-container {
   background: #1a1a1a;
   border-radius: 12px;

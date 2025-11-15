@@ -66,16 +66,18 @@ func capturePackets(handle *pcap.Handle) {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for packet := range packetSource.Packets() {
-		parsePacket(packet.Data())
+		// Get actual packet length from metadata
+		actualLength := uint32(packet.Metadata().Length)
+		parsePacket(packet.Data(), actualLength)
 	}
 }
 
-func parsePacket(data []byte) {
+func parsePacket(data []byte, actualSize uint32) {
 	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 	var srcIP, dstIP net.IP
 	var protocol string
-	size := uint32(len(data))
+	size := actualSize // Use actual packet size, not captured size
 
 	// Extract IP layer
 	if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
