@@ -160,6 +160,8 @@ else
     # Get gateway from DHCP-assigned route
     GATEWAY=$(ip netns exec kidosns ip route | grep default | awk '{print $3}')
     
+    ip netns exec appsns pkill dhclient 2>/dev/null || true
+    sleep 1
     ip netns exec appsns dhclient veth-app
     sleep 2
     VETH_APP_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
