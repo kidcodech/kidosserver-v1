@@ -17,14 +17,16 @@ type PacketInfo struct {
 
 // PacketStore holds all captured packets in memory
 type PacketStore struct {
-	mu      sync.RWMutex
-	packets []PacketInfo
+	mu         sync.RWMutex
+	packets    []PacketInfo
+	maxPackets int
 }
 
 // NewPacketStore creates a new packet store
 func NewPacketStore() *PacketStore {
 	return &PacketStore{
-		packets: make([]PacketInfo, 0, 10000),
+		packets:    make([]PacketInfo, 0, 10000),
+		maxPackets: 100000, // Keep max 100k packets to prevent OOM
 	}
 }
 
@@ -32,7 +34,15 @@ func NewPacketStore() *PacketStore {
 func (ps *PacketStore) AddPacket(pkt PacketInfo) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+
 	ps.packets = append(ps.packets, pkt)
+
+	// Implement ring buffer: if we exceed max, remove oldest packets
+	if len(ps.packets) > ps.maxPackets {
+		// Keep only the most recent maxPackets
+		copy(ps.packets, ps.packets[len(ps.packets)-ps.maxPackets:])
+		ps.packets = ps.packets[:ps.maxPackets]
+	}
 }
 
 // GetPackets returns a copy of all packets
