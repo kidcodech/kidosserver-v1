@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math/big"
 	"net"
@@ -61,9 +62,13 @@ var (
 
 	socketPath           = "/tmp/kidos-sniffer.sock"
 	dnsInspectorSockPath = "/tmp/kidos-dns-inspector.sock"
+	serverIP             = "192.168.1.12" // Default, will be loaded from config
 )
 
 func main() {
+	// Load server IP from network config
+	loadServerIP()
+
 	router := mux.NewRouter()
 
 	// API endpoints
@@ -99,7 +104,7 @@ func main() {
 		log.Println("Starting HTTP redirect server on :80")
 		http.ListenAndServe(":80", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Redirect all port 80 traffic to captive portal
-			http.Redirect(w, r, "http://192.168.1.6:8080/blocked", http.StatusFound)
+			http.Redirect(w, r, fmt.Sprintf("http://%s:8080/blocked", serverIP), http.StatusFound)
 		}))
 	}()
 
@@ -110,7 +115,7 @@ func main() {
 			Addr: ":443",
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// Redirect HTTPS traffic to HTTP captive portal
-				http.Redirect(w, r, "http://192.168.1.6:8080/blocked", http.StatusFound)
+				http.Redirect(w, r, fmt.Sprintf("http://%s:8080/blocked", serverIP), http.StatusFound)
 			}),
 			TLSConfig: &tls.Config{
 				Certificates: []tls.Certificate{cert},
@@ -125,6 +130,32 @@ func main() {
 	if err := http.ListenAndServe(":8080", router); err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
+}
+
+// loadServerIP loads the BR1_IP from the network config file
+func loadServerIP() {
+	configFile := "/tmp/kidos-network.conf"
+	data, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		log.Printf("Warning: Could not read network config %s: %v, using default IP %s", configFile, err, serverIP)
+		return
+	}
+
+	// Parse simple KEY="VALUE" format
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "BR1_IP=") {
+			// Extract value between quotes
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				ip := strings.Trim(parts[1], "\"")
+				serverIP = ip
+				log.Printf("✓ Loaded server IP from config: %s", serverIP)
+				return
+			}
+		}
+	}
+	log.Printf("Warning: BR1_IP not found in config, using default IP %s", serverIP)
 }
 
 // getPacketAggregates returns aggregated packet statistics
