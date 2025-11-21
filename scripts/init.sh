@@ -10,6 +10,10 @@ ip netns add ethns
 echo "Creating Kidos namespace (kidosns)..."
 ip netns add kidosns
 
+# Create Switch namespace
+echo "Creating Switch namespace (switchns)..."
+ip netns add switchns
+
 # Create Apps namespace
 echo "Creating Apps namespace (appsns)..."
 ip netns add appsns
@@ -48,13 +52,29 @@ ip netns exec kidosns ip link add name br1 type bridge
 echo "Adding veth-kidos to bridge in kidos namespace..."
 ip netns exec kidosns ip link set veth-kidos master br1
 
-# Create veth pair to connect kidos and apps namespaces
-echo "Creating veth pair between kidos and apps namespaces..."
-ip netns exec kidosns ip link add veth-kidos-app type veth peer name veth-app netns appsns
+# Create bridge in switch namespace
+echo "Creating bridge in switch namespace..."
+ip netns exec switchns ip link add name br-switch type bridge
 
-# Add veth-kidos-app to bridge
+# Create veth pair to connect kidos and switch namespaces
+echo "Creating veth pair between kidos and switch namespaces..."
+ip netns exec kidosns ip link add veth-kidos-app type veth peer name veth-sw netns switchns
+
+# Add veth-kidos-app to bridge in kidos
 echo "Adding veth-kidos-app to bridge in kidos namespace..."
 ip netns exec kidosns ip link set veth-kidos-app master br1
+
+# Add veth-sw to bridge in switch
+echo "Adding veth-sw to bridge in switch namespace..."
+ip netns exec switchns ip link set veth-sw master br-switch
+
+# Create veth pair to connect switch and apps namespaces
+echo "Creating veth pair between switch and apps namespaces..."
+ip netns exec switchns ip link add veth-sw-app type veth peer name veth-app netns appsns
+
+# Add veth-sw-app to bridge in switch
+echo "Adding veth-sw-app to bridge in switch namespace..."
+ip netns exec switchns ip link set veth-sw-app master br-switch
 
 # Bring up the interfaces
 echo "Bringing up interfaces..."
@@ -63,7 +83,15 @@ ip netns exec ethns ip link set br0 up
 ip netns exec kidosns ip link set veth-kidos up
 ip netns exec kidosns ip link set veth-kidos-app up
 ip netns exec kidosns ip link set br1 up
+ip netns exec switchns ip link set veth-sw up
+ip netns exec switchns ip link set veth-sw-app up
+ip netns exec switchns ip link set br-switch up
 ip netns exec appsns ip link set veth-app up
+
+# Configure switchns bridge IP
+echo "Configuring IP for switch bridge..."
+ip netns exec switchns ip addr add 192.168.1.100/24 dev br-switch
+ip netns exec switchns ip route add default via 192.168.1.1
 
 # Smart IP management: DHCP-then-static with fallback
 IP_CONFIG_FILE="/tmp/kidos-network.conf"
@@ -120,20 +148,16 @@ if [ -f "$IP_CONFIG_FILE" ]; then
         fi
         VETH_SUCCESS=true
     else
-        echo "⚠ Failed to assign stored IP to veth-app (possible conflict), requesting new DHCP lease..."
-        ip netns exec appsns dhclient veth-app
-        sleep 2
-        NEW_VETH_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
-        if [ -n "$NEW_VETH_IP" ]; then
-            VETH_APP_IP="$NEW_VETH_IP"
-            # Add default gateway (DHCP on veth pair might not provide gateway)
-            if [ -n "$GATEWAY" ]; then
-                ip netns exec appsns ip route add default via "$GATEWAY" 2>/dev/null && \
-                    echo "✓ Added default gateway for appsns: $GATEWAY"
-            fi
-            echo "✓ Got new IP via DHCP for veth-app: $VETH_APP_IP"
-            VETH_SUCCESS=true
+        echo "⚠ Failed to assign stored IP to veth-app (possible conflict), using static IP..."
+        VETH_APP_IP="192.168.1.7"
+        ip netns exec appsns ip addr add "$VETH_APP_IP/24" dev veth-app 2>/dev/null
+        # Add default gateway
+        if [ -n "$GATEWAY" ]; then
+            ip netns exec appsns ip route add default via "$GATEWAY" 2>/dev/null && \
+                echo "✓ Added default gateway for appsns: $GATEWAY"
         fi
+        echo "✓ Assigned static IP to veth-app: $VETH_APP_IP"
+        VETH_SUCCESS=true
     fi
 else
     echo "No stored IP configuration found, requesting DHCP leases..."
@@ -146,11 +170,10 @@ else
     
     ip netns exec appsns pkill dhclient 2>/dev/null || true
     sleep 1
-    ip netns exec appsns dhclient veth-app
-    sleep 2
-    VETH_APP_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    VETH_APP_IP="192.168.1.7"
+    ip netns exec appsns ip addr add "$VETH_APP_IP/24" dev veth-app 2>/dev/null
     
-    # Ensure appsns has default gateway (DHCP on veth pair might not provide it)
+    # Ensure appsns has default gateway
     if [ -n "$GATEWAY" ]; then
         ip netns exec appsns ip route add default via "$GATEWAY" 2>/dev/null && \
             echo "✓ Added default gateway for appsns: $GATEWAY"

@@ -8,6 +8,7 @@ echo "Tearing down monitoring namespace..."
 echo "Stopping DHCP clients..."
 ip netns exec ethns pkill dhclient 2>/dev/null || true
 ip netns exec kidosns pkill dhclient 2>/dev/null || true
+ip netns exec switchns pkill dhclient 2>/dev/null || true
 ip netns exec appsns pkill dhclient 2>/dev/null || true
 
 # Move physical interface back to default namespace
@@ -15,6 +16,9 @@ echo "Moving enp0s31f6 back to default namespace..."
 ip netns exec ethns ip link set enp0s31f6 netns 1 2>/dev/null || true
 
 # Delete network namespaces (this automatically removes all interfaces and bridges inside them)
+echo "Deleting Switch namespace..."
+ip netns del switchns 2>/dev/null || true
+
 echo "Deleting Kidos namespace..."
 ip netns del kidosns 2>/dev/null || true
 
