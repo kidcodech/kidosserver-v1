@@ -28,8 +28,12 @@ if [[ -x "${CHROMIUM}" ]]; then
     CHROM_LOG="/tmp/chrom-${APPS_NS}.log"
     touch "${CHROM_LOG}"
     chown "${APP_USER}:${APP_USER}" "${CHROM_LOG}"
-    ip netns exec "${APPS_NS}" sudo -u "${APP_USER}" bash -c \
-      "nohup env DISPLAY='${DISPLAY:-}' XDG_RUNTIME_DIR='/run/user/${APP_UID}' WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-}' '${CHROMIUM}' --user-data-dir=/tmp/chrom-${APPS_NS} --no-sandbox --disable-dev-shm-usage >'${CHROM_LOG}' 2>&1 & disown"
+    
+    # Build the full command
+    CMD="ip netns exec ${APPS_NS} sudo -u ${APP_USER} bash -c \"nohup env DISPLAY='${DISPLAY:-}' XDG_RUNTIME_DIR='/run/user/${APP_UID}' WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-}' '${CHROMIUM}' --user-data-dir=/tmp/chrom-${APPS_NS} --no-sandbox --disable-dev-shm-usage >'${CHROM_LOG}' 2>&1 & disown\""
+    
+    echo "[kidos] Executing: $CMD" >&2
+    eval "$CMD"
     echo "[kidos] chromium launched in ${APPS_NS}; logs at ${CHROM_LOG}" >&2
   fi
 else

@@ -34,19 +34,11 @@ ip netns exec ethns ip link set enp0s31f6 master br0
 
 # Create veth pair to connect ethernet and kidos namespaces
 echo "Creating veth pair between ethernet and kidos namespaces..."
-ip link add veth-eth type veth peer name veth-kidos
-
-# Move one end to ethernet namespace
-echo "Moving veth-eth to ethernet namespace..."
-ip link set veth-eth netns ethns
+ip netns exec ethns ip link add veth-eth type veth peer name veth-kidos netns kidosns
 
 # Add veth-eth to bridge
 echo "Adding veth-eth to bridge..."
 ip netns exec ethns ip link set veth-eth master br0
-
-# Move other end to kidos namespace
-echo "Moving veth-kidos to kidos namespace..."
-ip link set veth-kidos netns kidosns
 
 # Create bridge in kidos namespace
 echo "Creating bridge in kidos namespace..."
@@ -58,19 +50,11 @@ ip netns exec kidosns ip link set veth-kidos master br1
 
 # Create veth pair to connect kidos and apps namespaces
 echo "Creating veth pair between kidos and apps namespaces..."
-ip link add veth-kidos-app type veth peer name veth-app
-
-# Move one end to kidos namespace
-echo "Moving veth-kidos-app to kidos namespace..."
-ip link set veth-kidos-app netns kidosns
+ip netns exec kidosns ip link add veth-kidos-app type veth peer name veth-app netns appsns
 
 # Add veth-kidos-app to bridge
 echo "Adding veth-kidos-app to bridge in kidos namespace..."
 ip netns exec kidosns ip link set veth-kidos-app master br1
-
-# Move other end to apps namespace
-echo "Moving veth-app to apps namespace..."
-ip link set veth-app netns appsns
 
 # Bring up the interfaces
 echo "Bringing up interfaces..."

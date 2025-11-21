@@ -8,15 +8,7 @@ ip netns add monns
 
 # Create veth pair to connect kidos and monitoring namespaces
 echo "Creating veth pair between kidos and monitoring namespaces..."
-ip link add veth-mon-kidos type veth peer name veth-mon
-
-# Move one end to kidos namespace
-echo "Moving veth-mon-kidos to kidos namespace..."
-ip link set veth-mon-kidos netns kidosns
-
-# Move other end to monitoring namespace
-echo "Moving veth-mon to monitoring namespace..."
-ip link set veth-mon netns monns
+ip netns exec kidosns ip link add veth-mon-kidos type veth peer name veth-mon netns monns
 
 # Bring up the interfaces
 echo "Bringing up monitoring veth interfaces..."
