@@ -39,6 +39,7 @@ var (
 	blockedMutex       sync.RWMutex
 	captivePortalIP    string
 	blockedDomainsFile = "/tmp/kidos-blocked-domains.json"
+	kidosIP            = "192.168.1.12" // IP address for kidos domain
 )
 
 func loadBlockedDomains() {
@@ -289,20 +290,37 @@ func processPackets(xsk *xdp.Socket, reinjectFd int, reinjectAddr *syscall.Socka
 
 			actualPacket := frameData[:actualLen]
 
-			// Parse DNS packet and check if blocked
-			blocked, domain := checkAndParseDNS(actualPacket)
+			// Parse DNS packet and check if blocked or kidos
+			shouldIntercept, domain := checkAndParseDNS(actualPacket)
 
-			if blocked {
-				// Domain is blocked - craft DNS response pointing to captive portal
-				log.Printf("BLOCKED: DNS query for %s - redirecting to captive portal %s", domain, captivePortalIP)
-				response := craftDNSResponse(actualPacket, captivePortalIP)
-				if response != nil {
-					// Reinject crafted response to veth-kidos-app
-					err := reinjectPacket(craftedFd, craftedAddr, response)
-					if err != nil {
-						log.Printf("Failed to reinject blocked DNS response: %v", err)
-					} else {
-						log.Printf("✓ Blocked DNS response reinjected to veth-kidos-app (%d bytes)", len(response))
+			if shouldIntercept {
+				// Check if it's kidos domain or blocked domain
+				normalizedDomain := strings.TrimSuffix(strings.ToLower(domain), ".")
+				if normalizedDomain == "kidos" {
+					// Kidos domain - craft DNS response pointing to kidos IP
+					log.Printf("KIDOS: DNS query for %s - resolving to %s", domain, kidosIP)
+					response := craftDNSResponse(actualPacket, kidosIP)
+					if response != nil {
+						// Reinject crafted response to veth-kidos-app
+						err := reinjectPacket(craftedFd, craftedAddr, response)
+						if err != nil {
+							log.Printf("Failed to reinject kidos DNS response: %v", err)
+						} else {
+							log.Printf("✓ Kidos DNS response reinjected to veth-kidos-app (%d bytes)", len(response))
+						}
+					}
+				} else {
+					// Domain is blocked - craft DNS response pointing to captive portal
+					log.Printf("BLOCKED: DNS query for %s - redirecting to captive portal %s", domain, captivePortalIP)
+					response := craftDNSResponse(actualPacket, captivePortalIP)
+					if response != nil {
+						// Reinject crafted response to veth-kidos-app
+						err := reinjectPacket(craftedFd, craftedAddr, response)
+						if err != nil {
+							log.Printf("Failed to reinject blocked DNS response: %v", err)
+						} else {
+							log.Printf("✓ Blocked DNS response reinjected to veth-kidos-app (%d bytes)", len(response))
+						}
 					}
 				}
 			} else {
@@ -378,8 +396,9 @@ func parseDNSPacket(data []byte) {
 	log.Printf("DNS Query: %s -> %s [%s/%s]", ip.SrcIP, domain, queryType, queryClass)
 }
 
-// checkAndParseDNS checks if a DNS query is for a blocked domain
-// Returns (isBlocked, domainName)
+// checkAndParseDNS checks if a DNS query is for a blocked domain or kidos domain
+// Returns (isBlocked/isKidos, domainName, targetIP)
+// If targetIP is empty, pass through; otherwise craft response with targetIP
 func checkAndParseDNS(data []byte) (bool, string) {
 	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
@@ -399,6 +418,14 @@ func checkAndParseDNS(data []byte) (bool, string) {
 
 	//add domain logging
 	log.Printf("Checked DNS query for domain: %s", domain)
+
+	// Check for kidos domain (exact match or with trailing dot)
+	normalizedDomain := strings.TrimSuffix(strings.ToLower(domain), ".")
+	log.Printf("DEBUG: normalizedDomain='%s' (len=%d), comparing to 'kidos'", normalizedDomain, len(normalizedDomain))
+	if normalizedDomain == "kidos" {
+		log.Printf("KIDOS domain detected: %s - resolving to %s", domain, kidosIP)
+		return true, domain
+	}
 
 	// Check if domain or any parent domain is blocked
 	blockedMutex.RLock()
