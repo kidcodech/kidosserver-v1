@@ -10,6 +10,7 @@ ip netns exec ethns pkill dhclient 2>/dev/null || true
 ip netns exec kidosns pkill dhclient 2>/dev/null || true
 ip netns exec switchns pkill dhclient 2>/dev/null || true
 ip netns exec appsns pkill dhclient 2>/dev/null || true
+ip netns exec appsns2 pkill dhclient 2>/dev/null || true
 
 # Move physical interface back to default namespace
 echo "Moving enp0s31f6 back to default namespace..."
@@ -24,6 +25,9 @@ ip netns del kidosns 2>/dev/null || true
 
 echo "Deleting Apps namespace..."
 ip netns del appsns 2>/dev/null || true
+
+echo "Deleting Apps namespace 2..."
+ip netns del appsns2 2>/dev/null || true
 
 echo "Deleting Ethernet namespace..."
 ip netns del ethns 2>/dev/null || true

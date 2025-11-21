@@ -39,8 +39,32 @@ var (
 	blockedMutex       sync.RWMutex
 	captivePortalIP    string
 	blockedDomainsFile = "/tmp/kidos-blocked-domains.json"
-	kidosIP            = "192.168.1.12" // IP address for kidos domain
+	kidosIP            string // IP address for kidos domain, loaded from config
 )
+
+func loadKidosIP() {
+	configFile := "/tmp/kidos-network.conf"
+	data, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		log.Fatalf("Failed to read network config %s: %v", configFile, err)
+	}
+
+	// Parse simple KEY="VALUE" format
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "BR1_IP=") {
+			// Extract value between quotes
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				ip := strings.Trim(parts[1], "\"")
+				kidosIP = ip
+				log.Printf("✓ Loaded kidos IP from config: %s", kidosIP)
+				return
+			}
+		}
+	}
+	log.Fatalf("BR1_IP not found in config file %s", configFile)
+}
 
 func loadBlockedDomains() {
 	data, err := ioutil.ReadFile(blockedDomainsFile)
@@ -100,6 +124,9 @@ func main() {
 	blockedDomains = make(map[string]bool)
 	loadBlockedDomains()
 	log.Println("✓ Initialized blocked domains map")
+
+	// Load kidos IP from network config
+	loadKidosIP()
 
 	// Detect br1 IP address for captive portal
 	br1Iface, err := net.InterfaceByName("br1")

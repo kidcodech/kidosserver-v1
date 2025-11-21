@@ -62,7 +62,7 @@ var (
 
 	socketPath           = "/tmp/kidos-sniffer.sock"
 	dnsInspectorSockPath = "/tmp/kidos-dns-inspector.sock"
-	serverIP             = "192.168.1.12" // Default, will be loaded from config
+	serverIP             string // Will be loaded from config
 )
 
 func main() {
@@ -131,8 +131,7 @@ func loadServerIP() {
 	configFile := "/tmp/kidos-network.conf"
 	data, err := ioutil.ReadFile(configFile)
 	if err != nil {
-		log.Printf("Warning: Could not read network config %s: %v, using default IP %s", configFile, err, serverIP)
-		return
+		log.Fatalf("Failed to read network config %s: %v", configFile, err)
 	}
 
 	// Parse simple KEY="VALUE" format
@@ -149,7 +148,7 @@ func loadServerIP() {
 			}
 		}
 	}
-	log.Printf("Warning: BR1_IP not found in config, using default IP %s", serverIP)
+	log.Fatalf("BR1_IP not found in config file %s", configFile)
 }
 
 // captivePortalMiddleware redirects requests with unknown Host headers to /blocked
