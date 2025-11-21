@@ -105,15 +105,15 @@ echo "$WEBSERVER_PID" > /tmp/kidos-webserver.pid
 echo "=== Kidos Server v1 Started Successfully ==="
 echo ""
 echo "Access the monitoring dashboard at:"
-echo "  http://localhost:8080"
+echo "  http://localhost"
 if [ -n "$BR1_IP" ]; then
-    echo "  http://$BR1_IP:8080 (from within kidosns)"
+    echo "  http://$BR1_IP (from within kidosns)"
 fi
 echo ""
 echo "Captive portal for blocked domains:"
-echo "  http://localhost:8080/blocked"
+echo "  http://localhost/blocked"
 if [ -n "$BR1_IP" ]; then
-    echo "  http://$BR1_IP:8080/blocked"
+    echo "  http://$BR1_IP/blocked"
 fi
 echo ""
 echo "To generate test traffic:"

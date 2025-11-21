@@ -419,9 +419,11 @@ func checkAndParseDNS(data []byte) (bool, string) {
 	//add domain logging
 	log.Printf("Checked DNS query for domain: %s", domain)
 
-	// Check for kidos domain (exact match or with trailing dot)
+	// Normalize domain: lowercase and remove trailing dot
 	normalizedDomain := strings.TrimSuffix(strings.ToLower(domain), ".")
 	log.Printf("DEBUG: normalizedDomain='%s' (len=%d), comparing to 'kidos'", normalizedDomain, len(normalizedDomain))
+
+	// Check for kidos domain (exact match)
 	if normalizedDomain == "kidos" {
 		log.Printf("KIDOS domain detected: %s - resolving to %s", domain, kidosIP)
 		return true, domain
@@ -431,8 +433,8 @@ func checkAndParseDNS(data []byte) (bool, string) {
 	blockedMutex.RLock()
 	defer blockedMutex.RUnlock()
 
-	// Check exact match and parent domains
-	parts := splitDomain(domain)
+	// Check exact match and parent domains using normalized domain
+	parts := splitDomain(normalizedDomain)
 	for i := 0; i < len(parts); i++ {
 		checkDomain := joinDomain(parts[i:])
 		//log check domain

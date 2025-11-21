@@ -87,6 +87,9 @@ func main() {
 	// Serve static files from frontend/dist
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./frontend/dist")))
 
+	// Wrap router with captive portal middleware
+	handler := captivePortalMiddleware(router)
+
 	// Start broadcast goroutine
 	go handleBroadcast()
 
@@ -99,23 +102,14 @@ func main() {
 		log.Fatalf("Failed to generate self-signed certificate: %v", err)
 	}
 
-	// Start port 80 redirect server for captive portal
-	go func() {
-		log.Println("Starting HTTP redirect server on :80")
-		http.ListenAndServe(":80", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Redirect all port 80 traffic to captive portal
-			http.Redirect(w, r, fmt.Sprintf("http://%s:8080/blocked", serverIP), http.StatusFound)
-		}))
-	}()
-
-	// Start port 443 HTTPS server for captive portal
+	// Start port 443 HTTPS server for captive portal redirect
 	go func() {
 		log.Println("Starting HTTPS server on :443")
 		server := &http.Server{
 			Addr: ":443",
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Redirect HTTPS traffic to HTTP captive portal
-				http.Redirect(w, r, fmt.Sprintf("http://%s:8080/blocked", serverIP), http.StatusFound)
+				// Redirect HTTPS traffic to HTTP captive portal (port 80)
+				http.Redirect(w, r, fmt.Sprintf("http://%s/blocked", serverIP), http.StatusFound)
 			}),
 			TLSConfig: &tls.Config{
 				Certificates: []tls.Certificate{cert},
@@ -126,8 +120,8 @@ func main() {
 		}
 	}()
 
-	log.Println("Starting web server on :8080")
-	if err := http.ListenAndServe(":8080", router); err != nil {
+	log.Println("Starting web server on :80")
+	if err := http.ListenAndServe(":80", handler); err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
 }
@@ -156,6 +150,29 @@ func loadServerIP() {
 		}
 	}
 	log.Printf("Warning: BR1_IP not found in config, using default IP %s", serverIP)
+}
+
+// captivePortalMiddleware redirects requests with unknown Host headers to /blocked
+func captivePortalMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		// Remove port if present
+		if colonIndex := strings.Index(host, ":"); colonIndex != -1 {
+			host = host[:colonIndex]
+		}
+
+		// Allow requests to server IP, localhost, and kidos domain
+		// Also allow if path is already /blocked or starts with /api or /ws
+		if host == serverIP || host == "localhost" || host == "127.0.0.1" || host == "kidos" ||
+			r.URL.Path == "/blocked" || strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Unknown host (blocked domain) - redirect to captive portal
+		log.Printf("Captive portal redirect: Host=%s, Path=%s", r.Host, r.URL.Path)
+		http.Redirect(w, r, "/blocked", http.StatusFound)
+	})
 }
 
 // getPacketAggregates returns aggregated packet statistics
