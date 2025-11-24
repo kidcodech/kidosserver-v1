@@ -79,6 +79,7 @@ func main() {
 	router.HandleFunc("/api/dns/block", blockDomain).Methods("POST")
 	router.HandleFunc("/api/dns/unblock", unblockDomain).Methods("POST")
 	router.HandleFunc("/api/dns/blocked", getBlockedDomains).Methods("GET")
+	router.HandleFunc("/api/client/info", getClientInfo).Methods("GET")
 	router.HandleFunc("/ws", handleWebSocket)
 
 	// Captive portal page for blocked domains
@@ -282,6 +283,34 @@ func getBlockedDomains(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(domains)
+}
+
+// getClientInfo returns information about the client
+func getClientInfo(w http.ResponseWriter, r *http.Request) {
+	// Get client IP from RemoteAddr
+	clientIP := r.RemoteAddr
+	// Remove port if present
+	if colonIndex := strings.LastIndex(clientIP, ":"); colonIndex != -1 {
+		clientIP = clientIP[:colonIndex]
+	}
+
+	// Check X-Forwarded-For header for proxied requests
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// Use the first IP in the list
+		if commaIndex := strings.Index(xff, ","); commaIndex != -1 {
+			clientIP = strings.TrimSpace(xff[:commaIndex])
+		} else {
+			clientIP = strings.TrimSpace(xff)
+		}
+	}
+
+	info := map[string]string{
+		"ip":     clientIP,
+		"server": serverIP,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
 }
 
 // serveBlockedPage serves the captive portal page for blocked domains

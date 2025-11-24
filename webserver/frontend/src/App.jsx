@@ -155,12 +155,14 @@ function App() {
   const [lastPacketCount, setLastPacketCount] = useState(0)
   const [lastUpdateTime, setLastUpdateTime] = useState(Date.now())
   const [maxHistoryLength, setMaxHistoryLength] = useState(1200) // Default, will be updated by canvas width
+  const [clientIP, setClientIP] = useState('')
 
   useEffect(() => {
     // Fetch initial data
     fetchPackets()
     fetchDNSRequests()
     fetchBlockedDomains()
+    fetchClientInfo()
 
     // Auto-refresh every second
     const refreshInterval = setInterval(() => {
@@ -267,6 +269,16 @@ function App() {
     }
   }
 
+  const fetchClientInfo = async () => {
+    try {
+      const response = await fetch('/api/client/info')
+      const data = await response.json()
+      setClientIP(data.ip || '')
+    } catch (error) {
+      console.error('Error fetching client info:', error)
+    }
+  }
+
   const blockDomain = async (domain) => {
     try {
       await fetch('/api/dns/block', {
@@ -343,6 +355,11 @@ function App() {
               {ws && ws.readyState === WebSocket.OPEN ? '● Live' : '○ Offline'}
             </span>
           </div>
+          {clientIP && (
+            <div className="client-info">
+              <span className="client-ip">📍 {clientIP}</span>
+            </div>
+          )}
         </div>
 
         <nav className="sidebar-nav">

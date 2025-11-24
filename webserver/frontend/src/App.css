@@ -48,6 +48,19 @@ body {
   font-weight: 500;
 }
 
+.client-info {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #2a2a3e;
+}
+
+.client-ip {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  font-family: monospace;
+  display: block;
+}
+
 .connected {
   color: #4ade80;
   animation: pulse 2s infinite;
