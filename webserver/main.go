@@ -15,12 +15,14 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/kidcodech/kidosserver-v1/webserver/db"
 )
 
 // PacketAggregate represents aggregated packet statistics
@@ -69,6 +71,12 @@ func main() {
 	// Load server IP from network config
 	loadServerIP()
 
+	// Initialize database
+	if err := db.InitDB(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.DB.Close()
+
 	router := mux.NewRouter()
 
 	// API endpoints
@@ -80,6 +88,18 @@ func main() {
 	router.HandleFunc("/api/dns/unblock", unblockDomain).Methods("POST")
 	router.HandleFunc("/api/dns/blocked", getBlockedDomains).Methods("GET")
 	router.HandleFunc("/api/client/info", getClientInfo).Methods("GET")
+
+	// User management endpoints
+	router.HandleFunc("/api/users", getUsers).Methods("GET")
+	router.HandleFunc("/api/users", createUser).Methods("POST")
+	router.HandleFunc("/api/users/{id}", getUser).Methods("GET")
+	router.HandleFunc("/api/users/{id}", updateUser).Methods("PUT")
+	router.HandleFunc("/api/users/{id}", deleteUser).Methods("DELETE")
+	router.HandleFunc("/api/users/{id}/ips", getUserIPs).Methods("GET")
+	router.HandleFunc("/api/users/{id}/ips", addUserIP).Methods("POST")
+	router.HandleFunc("/api/users/{id}/ips/{ip_id}", deleteUserIP).Methods("DELETE")
+	router.HandleFunc("/api/users/by-ip/{ip}", getUserByIPAddress).Methods("GET")
+
 	router.HandleFunc("/ws", handleWebSocket)
 
 	// Captive portal page for blocked domains
@@ -287,6 +307,29 @@ func getBlockedDomains(w http.ResponseWriter, r *http.Request) {
 
 // getClientInfo returns information about the client
 func getClientInfo(w http.ResponseWriter, r *http.Request) {
+	clientIP := extractClientIP(r)
+
+	// Look up user by IP
+	user, _ := db.GetUserByIP(clientIP)
+
+	info := map[string]interface{}{
+		"ip":     clientIP,
+		"server": serverIP,
+	}
+
+	if user != nil {
+		info["user"] = map[string]string{
+			"username":     user.Username,
+			"display_name": user.DisplayName,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
+// extractClientIP extracts the client IP from the request
+func extractClientIP(r *http.Request) string {
 	// Get client IP from RemoteAddr
 	clientIP := r.RemoteAddr
 	// Remove port if present
@@ -304,13 +347,7 @@ func getClientInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	info := map[string]string{
-		"ip":     clientIP,
-		"server": serverIP,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	return clientIP
 }
 
 // serveBlockedPage serves the captive portal page for blocked domains
@@ -604,6 +641,216 @@ func mustMarshal(v interface{}) json.RawMessage {
 		panic(err)
 	}
 	return data
+}
+
+// ===== User Management Handlers =====
+
+// getUsers returns all users with their IP addresses
+func getUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := db.GetAllUsers()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch users: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
+}
+
+// createUser creates a new user
+func createUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Username == "" || req.DisplayName == "" || req.Password == "" {
+		http.Error(w, "Username, display_name, and password are required", http.StatusBadRequest)
+		return
+	}
+
+	user, err := db.CreateUser(req.Username, req.DisplayName, req.Password)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create user: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
+}
+
+// getUser returns a single user by ID
+func getUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	user, err := db.GetUser(id)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch user: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if user == nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+// updateUser updates an existing user
+func updateUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Username    string  `json:"username"`
+		DisplayName string  `json:"display_name"`
+		Password    *string `json:"password,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Username == "" || req.DisplayName == "" {
+		http.Error(w, "Username and display_name are required", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.UpdateUser(id, req.Username, req.DisplayName, req.Password); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update user: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	user, _ := db.GetUser(id)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+// deleteUser deletes a user
+func deleteUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.DeleteUser(id); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete user: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// getUserIPs returns all IP addresses for a user
+func getUserIPs(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	ips, err := db.GetUserIPs(id)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch IPs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ips)
+}
+
+// addUserIP adds an IP address to a user
+func addUserIP(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		IPAddress  string `json:"ip_address"`
+		DeviceName string `json:"device_name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.IPAddress == "" {
+		http.Error(w, "ip_address is required", http.StatusBadRequest)
+		return
+	}
+
+	ip, err := db.AddUserIP(id, req.IPAddress, req.DeviceName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to add IP: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(ip)
+}
+
+// deleteUserIP removes an IP address from a user
+func deleteUserIP(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	ipID, err := strconv.Atoi(vars["ip_id"])
+	if err != nil {
+		http.Error(w, "Invalid IP ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.DeleteUserIP(ipID); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete IP: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// getUserByIPAddress returns user information for a given IP address
+func getUserByIPAddress(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	ipAddress := vars["ip"]
+
+	user, err := db.GetUserByIP(ipAddress)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch user: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if user == nil {
+		http.Error(w, "No user found for this IP", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
 }
 
 // generateSelfSignedCert creates a self-signed TLS certificate for captive portal

@@ -64,7 +64,7 @@ echo ""
 echo "[5/5] Building Go webserver..."
 cd "$PROJECT_ROOT/webserver"
 go mod tidy
-go build -o webserver main.go
+go build -o webserver
 echo "✓ Webserver built"
 echo ""
 

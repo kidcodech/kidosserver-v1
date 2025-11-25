@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
+import UserManagement from './components/UserManagement'
 
 // Helper function to format bytes
 const formatBytes = (bytes) => {
@@ -156,6 +157,7 @@ function App() {
   const [lastUpdateTime, setLastUpdateTime] = useState(Date.now())
   const [maxHistoryLength, setMaxHistoryLength] = useState(1200) // Default, will be updated by canvas width
   const [clientIP, setClientIP] = useState('')
+  const [userName, setUserName] = useState('')
 
   useEffect(() => {
     // Fetch initial data
@@ -274,6 +276,11 @@ function App() {
       const response = await fetch('/api/client/info')
       const data = await response.json()
       setClientIP(data.ip || '')
+      if (data.user) {
+        setUserName(data.user.display_name)
+      } else {
+        setUserName('')
+      }
     } catch (error) {
       console.error('Error fetching client info:', error)
     }
@@ -358,6 +365,7 @@ function App() {
           {clientIP && (
             <div className="client-info">
               <span className="client-ip">📍 {clientIP}</span>
+              {userName && <span className="client-user">👤 {userName}</span>}
             </div>
           )}
         </div>
@@ -390,6 +398,13 @@ function App() {
           >
             <span className="nav-icon">🚫</span>
             <span className="nav-text">Blocked Domains</span>
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
+            onClick={() => setActiveTab('users')}
+          >
+            <span className="nav-icon">👥</span>
+            <span className="nav-text">Users</span>
           </button>
         </nav>
       </aside>
@@ -644,6 +659,8 @@ function App() {
           </div>
         </>
       )}
+
+      {activeTab === 'users' && <UserManagement />}
       </main>
     </div>
   )
