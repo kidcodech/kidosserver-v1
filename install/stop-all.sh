@@ -31,7 +31,7 @@ fi
 echo ""
 
 # 2. Stop DNS inspector - kill ALL dns-inspector processes first
-echo "[2/3] Stopping DNS inspector..."
+echo "[2/4] Stopping DNS inspector..."
 DNS_PIDS=$(pgrep -f "parental/dns-inspector/dns-inspector" || true)
 if [ -n "$DNS_PIDS" ]; then
     echo "Found DNS inspector processes: $DNS_PIDS"
@@ -43,8 +43,21 @@ fi
 [ -f /tmp/kidos-dns-inspector.pid ] && rm /tmp/kidos-dns-inspector.pid
 echo ""
 
-# 3. Stop sniffer - kill ALL sniffer processes first
-echo "[3/3] Stopping packet sniffer..."
+# 3. Stop IP filter sync daemon
+echo "[3/4] Stopping IP filter sync daemon..."
+IP_FILTER_PIDS=$(pgrep -f "parental/ip-filter/ip-filter-sync" || true)
+if [ -n "$IP_FILTER_PIDS" ]; then
+    echo "Found IP filter processes: $IP_FILTER_PIDS"
+    pkill -9 -f "parental/ip-filter/ip-filter-sync"
+    echo "✓ All IP filter processes killed"
+else
+    echo "✓ No IP filter processes running"
+fi
+[ -f /tmp/kidos-ip-filter.pid ] && rm /tmp/kidos-ip-filter.pid
+echo ""
+
+# 4. Stop sniffer - kill ALL sniffer processes first
+echo "[4/4] Stopping packet sniffer..."
 SNIFFER_PIDS=$(pgrep -f "monitoring/sniffer/sniffer" || true)
 if [ -n "$SNIFFER_PIDS" ]; then
     echo "Found sniffer processes: $SNIFFER_PIDS"
@@ -74,4 +87,6 @@ echo "  sudo ./scripts/teardown.sh"
 echo ""
 echo "Logs preserved:"
 echo "  Sniffer: /tmp/kidos-sniffer.log"
+echo "  DNS Inspector: /tmp/kidos-dns-inspector.log"
+echo "  IP Filter: /tmp/kidos-ip-filter.log"
 echo "  Webserver: /tmp/kidos-webserver.log"

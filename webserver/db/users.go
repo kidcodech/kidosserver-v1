@@ -189,3 +189,28 @@ func GetUserByIP(ipAddress string) (*UserWithIPs, error) {
 	u.IPs, err = GetUserIPs(u.ID)
 	return &u, err
 }
+
+// AuthenticateUser verifies username and password, returns user if valid
+func AuthenticateUser(username, password string) (*User, error) {
+	var u User
+	var passwordHash string
+
+	err := DB.QueryRow(
+		"SELECT id, username, password_hash, display_name, created_at, updated_at FROM users WHERE username = ?",
+		username,
+	).Scan(&u.ID, &u.Username, &passwordHash, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, err // User not found
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify password
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
+		return nil, err // Invalid password
+	}
+
+	return &u, nil
+}

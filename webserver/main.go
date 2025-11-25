@@ -100,6 +100,9 @@ func main() {
 	router.HandleFunc("/api/users/{id}/ips/{ip_id}", deleteUserIP).Methods("DELETE")
 	router.HandleFunc("/api/users/by-ip/{ip}", getUserByIPAddress).Methods("GET")
 
+	// Auth endpoint for device registration
+	router.HandleFunc("/api/auth/register-device", registerDevice).Methods("POST")
+
 	router.HandleFunc("/ws", handleWebSocket)
 
 	// Captive portal page for blocked domains
@@ -851,6 +854,95 @@ func getUserByIPAddress(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(user)
+}
+
+// registerDevice handles device registration from /auth page
+func registerDevice(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		DeviceName string `json:"device_name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Username == "" || req.Password == "" {
+		http.Error(w, "Username and password are required", http.StatusBadRequest)
+		return
+	}
+
+	// Get client IP
+	clientIP := extractClientIP(r)
+
+	// Authenticate user
+	user, err := db.AuthenticateUser(req.Username, req.Password)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Invalid username or password",
+		})
+		return
+	}
+
+	// Check if IP already registered
+	existingUser, err := db.GetUserByIP(clientIP)
+	if err == nil && existingUser != nil {
+		// IP already registered
+		if existingUser.ID == user.ID {
+			// Same user, already registered
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":            true,
+				"already_registered": true,
+				"message":            "This device is already registered to your account",
+			})
+			return
+		} else {
+			// IP registered to different user - conflict
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("This IP address is already registered to user: %s", existingUser.Username),
+			})
+			return
+		}
+	}
+
+	// Add IP to user's device list
+	deviceName := req.DeviceName
+	if deviceName == "" {
+		deviceName = "Device"
+	}
+
+	_, err = db.AddUserIP(user.ID, clientIP, deviceName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to register device: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Notify sync daemon to update eBPF map (will be implemented)
+	notifyIPMapUpdate()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":            true,
+		"already_registered": false,
+		"message":            "Device registered successfully! You can now access the internet.",
+		"user_id":            user.ID,
+		"username":           user.Username,
+		"ip_address":         clientIP,
+	})
+}
+
+// notifyIPMapUpdate notifies the sync daemon to update the eBPF map
+// This will be implemented when we create the sync daemon
+func notifyIPMapUpdate() {
+	// TODO: Send signal to sync daemon via socket or shared memory
+	log.Println("IP map update notification (sync daemon not yet implemented)")
 }
 
 // generateSelfSignedCert creates a self-signed TLS certificate for captive portal

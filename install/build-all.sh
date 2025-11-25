@@ -36,32 +36,40 @@ chmod +x build.sh
 echo "✓ eBPF monitoring program built"
 echo ""
 
-# 2. Build eBPF program (DNS inspector)
-echo "[2/5] Building eBPF XDP program for DNS inspector..."
-cd "$PROJECT_ROOT/parental/dns-inspector/ebpf"
-make clean
-make
-echo "✓ eBPF DNS inspector program built"
+# 2. Build combined eBPF XDP program (IP filter + DNS redirection)
+echo "[2/7] Building combined eBPF XDP program (IP filter + DNS inspector)..."
+cd "$PROJECT_ROOT/parental/ip-filter"
+chmod +x build.sh
+./build.sh
+echo "✓ Combined eBPF XDP program built"
 echo ""
 
 # 3. Build Go sniffer daemon
-echo "[3/5] Building Go packet sniffer..."
+echo "[3/7] Building Go packet sniffer..."
 cd "$PROJECT_ROOT/monitoring/sniffer"
 go mod tidy
 go build -o sniffer main.go
 echo "✓ Sniffer daemon built"
 echo ""
 
-# 4. Build Go DNS inspector daemon
-echo "[4/5] Building Go DNS inspector..."
+# 5. Build Go DNS inspector daemon
+echo "[5/7] Building Go DNS inspector..."
 cd "$PROJECT_ROOT/parental/dns-inspector"
 go mod tidy
 go build -o dns-inspector main.go
 echo "✓ DNS inspector daemon built"
 echo ""
 
-# 5. Build Go webserver
-echo "[5/5] Building Go webserver..."
+# 5. Build Go IP filter sync daemon
+echo "[5/7] Building Go IP filter sync daemon..."
+cd "$PROJECT_ROOT/parental/ip-filter"
+go mod tidy
+go build -o ip-filter-sync main.go
+echo "✓ IP filter sync daemon built"
+echo ""
+
+# 7. Build Go webserver
+echo "[7/7] Building Go webserver..."
 cd "$PROJECT_ROOT/webserver"
 go mod tidy
 go build -o webserver
@@ -69,7 +77,7 @@ echo "✓ Webserver built"
 echo ""
 
 # 6. Build React frontend
-echo "[6/6] Building React frontend..."
+echo "[6/7] Building React frontend..."
 cd "$PROJECT_ROOT/webserver/frontend"
 npm install
 npm run build
@@ -81,8 +89,10 @@ echo ""
 echo "Binaries created:"
 echo "  - monitoring/ebpf/xdp_afxdp.o (eBPF object for monitoring)"
 echo "  - parental/dns-inspector/xdp_dns.o (eBPF object for DNS inspection)"
+echo "  - parental/ip-filter/xdp_ip_filter.o (eBPF object for IP filtering)"
 echo "  - monitoring/sniffer/sniffer (Go binary)"
 echo "  - parental/dns-inspector/dns-inspector (Go binary)"
+echo "  - parental/ip-filter/ip-filter-sync (Go binary)"
 echo "  - webserver/webserver (Go binary)"
 echo "  - webserver/frontend/dist/ (React static files)"
 echo ""

@@ -34,6 +34,11 @@ if [ ! -f "parental/dns-inspector/dns-inspector" ]; then
     exit 1
 fi
 
+if [ ! -f "parental/ip-filter/ip-filter-sync" ]; then
+    echo "Error: IP filter sync daemon not found. Run ./install/build-all.sh first"
+    exit 1
+fi
+
 if [ ! -f "webserver/webserver" ]; then
     echo "Error: Webserver binary not found. Run ./install/build-all.sh first"
     exit 1
@@ -68,25 +73,40 @@ echo ""
 # Wait a moment for sniffer to initialize
 sleep 2
 
-# 2. Start DNS inspector in kidos namespace
-echo "[2/3] Starting DNS inspector daemon..."
-# Remove any existing XDP program first (both native and generic)
+# 2. Load combined XDP program (IP filter + DNS redirection)
+echo "[2/4] Loading combined XDP program (IP filter + DNS inspector)..."
+# Remove any existing XDP programs first
 ip netns exec kidosns ip link set veth-kidos-app xdp off 2>/dev/null || true
 ip netns exec kidosns ip link set veth-kidos-app xdpgeneric off 2>/dev/null || true
-# Load XDP program in native mode
-ip netns exec kidosns ip link set veth-kidos-app xdp obj "$PROJECT_ROOT/parental/dns-inspector/ebpf/xdp_dns.o" sec xdp
-# Start daemon
+# Load combined IP filter XDP (includes xsks_map for DNS)
+ip netns exec kidosns ip link set veth-kidos-app xdp obj "$PROJECT_ROOT/parental/ip-filter/xdp_ip_filter.o" sec xdp
+echo "✓ Combined XDP program loaded"
+echo ""
+
+# Wait for XDP to attach
+sleep 1
+
+# 3. Start DNS inspector daemon (will find xsks_map and register AF_XDP socket)
+echo "[3/4] Starting DNS inspector daemon..."
 ip netns exec kidosns "$PROJECT_ROOT/parental/dns-inspector/dns-inspector" veth-kidos-app > /tmp/kidos-dns-inspector.log 2>&1 &
 DNS_INSPECTOR_PID=$!
 echo "✓ DNS inspector started (PID: $DNS_INSPECTOR_PID)"
 echo "  Logs: /tmp/kidos-dns-inspector.log"
 echo ""
 
-# Wait a moment for DNS inspector to initialize
+# Wait for DNS inspector to initialize
 sleep 2
 
-# 3. Start webserver in kidosns namespace (so it can listen on br1 IP)
-echo "[3/3] Starting web server in kidosns namespace..."
+# 4. Start IP filter sync daemon (will find maps and sync registered IPs)
+echo "[4/4] Starting IP filter sync daemon..."
+"$PROJECT_ROOT/parental/ip-filter/ip-filter-sync" > /tmp/kidos-ip-filter.log 2>&1 &
+IP_FILTER_PID=$!
+echo "✓ IP filter sync daemon started (PID: $IP_FILTER_PID)"
+echo "  Logs: /tmp/kidos-ip-filter.log"
+echo ""
+
+# Wait for IP filter to initialize
+sleep 2
 cd "$PROJECT_ROOT/webserver"
 ip netns exec kidosns ./webserver > /tmp/kidos-webserver.log 2>&1 &
 WEBSERVER_PID=$!
@@ -100,21 +120,22 @@ BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.
 # Save PIDs for stop script
 echo "$SNIFFER_PID" > /tmp/kidos-sniffer.pid
 echo "$DNS_INSPECTOR_PID" > /tmp/kidos-dns-inspector.pid
+echo "$IP_FILTER_PID" > /tmp/kidos-ip-filter.pid
 echo "$WEBSERVER_PID" > /tmp/kidos-webserver.pid
 
 echo "=== Kidos Server v1 Started Successfully ==="
 echo ""
 echo "Access the monitoring dashboard at:"
-echo "  http://localhost"
+echo "  http://kidos/"
 if [ -n "$BR1_IP" ]; then
-    echo "  http://$BR1_IP (from within kidosns)"
+    echo "  (resolves to $BR1_IP)"
 fi
 echo ""
+echo "Device registration (for clients):"
+echo "  http://kidos/auth"
+echo ""
 echo "Captive portal for blocked domains:"
-echo "  http://localhost/blocked"
-if [ -n "$BR1_IP" ]; then
-    echo "  http://$BR1_IP/blocked"
-fi
+echo "  http://kidos/blocked"
 echo ""
 echo "To generate test traffic:"
 echo "  sudo ip netns exec appsns ping 8.8.8.8"
@@ -126,4 +147,5 @@ echo ""
 echo "Process IDs saved:"
 echo "  Sniffer: $SNIFFER_PID"
 echo "  DNS Inspector: $DNS_INSPECTOR_PID"
+echo "  IP Filter: $IP_FILTER_PID"
 echo "  Webserver: $WEBSERVER_PID"
