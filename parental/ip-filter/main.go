@@ -25,6 +25,7 @@ const (
 
 var (
 	allowedIPsMap *ebpf.Map
+	droppedIPsMap *ebpf.Map
 	statsMap      *ebpf.Map
 	xsksMap       *ebpf.Map
 )
@@ -44,6 +45,7 @@ func main() {
 	}
 	log.Println("✓ Found all required eBPF maps")
 	defer allowedIPsMap.Close()
+	defer droppedIPsMap.Close()
 	defer statsMap.Close()
 
 	// Initial sync
@@ -66,6 +68,9 @@ func main() {
 		case <-ticker.C:
 			if err := syncIPsFromDatabase(); err != nil {
 				log.Printf("Sync error: %v", err)
+			}
+			if err := processDroppedIPs(); err != nil {
+				log.Printf("Process dropped IPs error: %v", err)
 			}
 		case <-sigChan:
 			log.Println("Shutting down...")
@@ -98,6 +103,28 @@ func findLoadedMaps() error {
 	}
 	if allowedIPsMap == nil {
 		return fmt.Errorf("allowed_ips map not found - is XDP program loaded?")
+	}
+
+	// Search for dropped_ips map
+	for mapID := ebpf.MapID(10000); mapID >= 1; mapID-- {
+		m, err := ebpf.NewMapFromID(mapID)
+		if err != nil {
+			continue
+		}
+		info, err := m.Info()
+		if err != nil {
+			m.Close()
+			continue
+		}
+		if info.Name == "dropped_ips" && info.Type == ebpf.Hash {
+			droppedIPsMap = m
+			log.Printf("✓ Found dropped_ips map (ID %d)", mapID)
+			break
+		}
+		m.Close()
+	}
+	if droppedIPsMap == nil {
+		return fmt.Errorf("dropped_ips map not found - is XDP program loaded?")
 	}
 
 	// Search for stats map
@@ -253,4 +280,51 @@ func printStats() {
 			}
 		}
 	}
+}
+
+// processDroppedIPs reads dropped IPs from BPF map and records them in database
+func processDroppedIPs() error {
+	var key uint32
+	var count uint64
+	iter := droppedIPsMap.Iterate()
+
+	recorded := 0
+	for iter.Next(&key, &count) {
+		if count == 0 {
+			continue
+		}
+
+		// Convert IP to string
+		ipStr := uint32ToIP(key)
+
+		// Record in database
+		if err := db.RecordUnregisteredDevice(ipStr); err != nil {
+			log.Printf("Failed to record unregistered device %s: %v", ipStr, err)
+		} else {
+			recorded++
+		}
+
+		// Clear the counter for this IP (we've recorded it)
+		zero := uint64(0)
+		if err := droppedIPsMap.Put(&key, &zero); err != nil {
+			log.Printf("Failed to reset counter for %s: %v", ipStr, err)
+		}
+	}
+
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("error iterating dropped_ips map: %w", err)
+	}
+
+	if recorded > 0 {
+		log.Printf("Recorded %d unregistered device attempt(s)", recorded)
+	}
+
+	return nil
+}
+
+// uint32ToIP converts a uint32 IP to string format
+func uint32ToIP(ipNum uint32) string {
+	ip := make(net.IP, 4)
+	binary.LittleEndian.PutUint32(ip, ipNum)
+	return ip.String()
 }

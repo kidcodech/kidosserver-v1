@@ -33,6 +33,15 @@ type BlockedDomain struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// UnregisteredDevice represents a device trying to access internet without registration
+type UnregisteredDevice struct {
+	ID           int       `json:"id"`
+	IPAddress    string    `json:"ip_address"`
+	FirstSeen    time.Time `json:"first_seen"`
+	LastSeen     time.Time `json:"last_seen"`
+	AttemptCount int       `json:"attempt_count"`
+}
+
 // UserWithIPs represents a user with all their assigned IP addresses
 type UserWithIPs struct {
 	User
@@ -330,4 +339,47 @@ func GetAllBlockedDomainsMap() (map[int]map[string]bool, error) {
 	}
 
 	return blockedMap, nil
+}
+
+// RecordUnregisteredDevice records or updates an unregistered device attempt
+func RecordUnregisteredDevice(ipAddress string) error {
+	// Try to insert, or update if exists
+	_, err := DB.Exec(`
+		INSERT INTO unregistered_devices (ip_address, first_seen, last_seen, attempt_count)
+		VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
+		ON CONFLICT(ip_address) DO UPDATE SET
+			last_seen = CURRENT_TIMESTAMP,
+			attempt_count = attempt_count + 1
+	`, ipAddress)
+	return err
+}
+
+// GetUnregisteredDevices returns all unregistered devices
+func GetUnregisteredDevices() ([]UnregisteredDevice, error) {
+	rows, err := DB.Query(`
+		SELECT id, ip_address, first_seen, last_seen, attempt_count
+		FROM unregistered_devices
+		WHERE ip_address NOT IN (SELECT ip_address FROM user_ips)
+		ORDER BY last_seen DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var devices []UnregisteredDevice
+	for rows.Next() {
+		var d UnregisteredDevice
+		if err := rows.Scan(&d.ID, &d.IPAddress, &d.FirstSeen, &d.LastSeen, &d.AttemptCount); err != nil {
+			return nil, err
+		}
+		devices = append(devices, d)
+	}
+	return devices, nil
+}
+
+// ClearUnregisteredDevice removes a device from unregistered list (called when registered)
+func ClearUnregisteredDevice(ipAddress string) error {
+	_, err := DB.Exec("DELETE FROM unregistered_devices WHERE ip_address = ?", ipAddress)
+	return err
 }

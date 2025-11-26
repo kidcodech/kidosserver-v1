@@ -163,6 +163,10 @@ function App() {
   const [userBlockedDomains, setUserBlockedDomains] = useState([])
   const [newUserDomain, setNewUserDomain] = useState('')
   const [newUserIP, setNewUserIP] = useState('')
+  const [usersSubTab, setUsersSubTab] = useState('manage')
+  const [unregisteredDevices, setUnregisteredDevices] = useState([])
+  const [showCreateUserModal, setShowCreateUserModal] = useState(false)
+  const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '' })
 
   useEffect(() => {
     // Fetch initial data
@@ -171,12 +175,16 @@ function App() {
     fetchBlockedDomains()
     fetchClientInfo()
     fetchUsers()
+    fetchUnregisteredDevices()
 
     // Auto-refresh every second
     const refreshInterval = setInterval(() => {
       fetchPackets()
       fetchDNSRequests()
       fetchBlockedDomains()
+      if (activeTab === 'users' && usersSubTab === 'devices') {
+        fetchUnregisteredDevices()
+      }
     }, 1000)
 
     // Setup WebSocket connection
@@ -449,6 +457,69 @@ function App() {
     
     await addUserIP(selectedUser.id, ip)
     setNewUserIP('')
+  }
+
+  const fetchUnregisteredDevices = async () => {
+    try {
+      const response = await fetch('/api/devices/unregistered')
+      const data = await response.json()
+      setUnregisteredDevices(data || [])
+    } catch (error) {
+      console.error('Error fetching unregistered devices:', error)
+    }
+  }
+
+  const registerDeviceToUser = async (ip, userId) => {
+    try {
+      await fetch(`/api/users/${userId}/ips`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip_address: ip })
+      })
+      fetchUnregisteredDevices()
+      fetchUsers()
+    } catch (error) {
+      console.error('Error registering device:', error)
+    }
+  }
+
+  const createUser = async () => {
+    if (!newUser.username || !newUser.display_name || !newUser.password) {
+      alert('All fields are required')
+      return
+    }
+    try {
+      const response = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser)
+      })
+      if (response.ok) {
+        setShowCreateUserModal(false)
+        setNewUser({ username: '', display_name: '', password: '' })
+        fetchUsers()
+      } else {
+        const error = await response.text()
+        alert(`Failed to create user: ${error}`)
+      }
+    } catch (error) {
+      console.error('Error creating user:', error)
+    }
+  }
+
+  const deleteUser = async (userId, username) => {
+    if (!confirm(`Are you sure you want to delete user "${username}"? This will remove all their IP addresses and blocked domains.`)) {
+      return
+    }
+    try {
+      await fetch(`/api/users/${userId}`, { method: 'DELETE' })
+      if (selectedUser?.id === userId) {
+        setSelectedUser(null)
+      }
+      fetchUsers()
+    } catch (error) {
+      console.error('Error deleting user:', error)
+    }
   }
 
   const clearPackets = async () => {
@@ -791,14 +862,34 @@ function App() {
       {activeTab === 'users' && (
         <>
           <div className="controls">
-            <button onClick={fetchUsers} className="btn btn-primary">
-              🔄 Refresh Users
+            <div className="user-tabs">
+              <button 
+                className={`user-tab ${usersSubTab === 'manage' ? 'active' : ''}`}
+                onClick={() => setUsersSubTab('manage')}
+              >
+                👥 Manage Users
+              </button>
+              <button 
+                className={`user-tab ${usersSubTab === 'devices' ? 'active' : ''}`}
+                onClick={() => setUsersSubTab('devices')}
+              >
+                📱 Unregistered Devices
+              </button>
+            </div>
+            <button onClick={usersSubTab === 'manage' ? fetchUsers : fetchUnregisteredDevices} className="btn btn-primary">
+              🔄 Refresh
             </button>
           </div>
 
+          {usersSubTab === 'manage' && (
           <div className="users-layout">
             <div className="users-list">
-              <h2>Users</h2>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
+                <h2>Users</h2>
+                <button onClick={() => setShowCreateUserModal(true)} className="btn btn-success">
+                  ➕ Create User
+                </button>
+              </div>
               <div className="user-cards">
                 {users.length === 0 ? (
                   <div className="no-data">No users found</div>
@@ -815,6 +906,13 @@ function App() {
                           <div className="user-name">{user.display_name || user.username}</div>
                           <div className="user-username">@{user.username}</div>
                         </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); deleteUser(user.id, user.username); }}
+                          className="btn btn-small btn-danger"
+                          style={{marginLeft: 'auto'}}
+                        >
+                          🗑️
+                        </button>
                       </div>
                       {user.ips && user.ips.length > 0 && (
                         <div className="user-ips">
@@ -944,9 +1042,116 @@ function App() {
             )}
           </div>
           </div>
+          )}
+
+          {usersSubTab === 'devices' && (
+            <div className="devices-section">
+              <div className="stats-summary">
+                <div className="stat-card">
+                  <h3>Unregistered Devices</h3>
+                  <p className="stat-value">{unregisteredDevices.length}</p>
+                </div>
+              </div>
+
+              <div className="packet-table-container">
+                <table className="packet-table">
+                  <thead>
+                    <tr>
+                      <th style={{width: '25%'}}>IP Address</th>
+                      <th style={{width: '20%'}}>First Seen</th>
+                      <th style={{width: '20%'}}>Last Seen</th>
+                      <th style={{width: '15%'}}>Attempts</th>
+                      <th style={{width: '20%'}}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unregisteredDevices.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" className="no-data">No unregistered devices detected</td>
+                      </tr>
+                    ) : (
+                      unregisteredDevices.map((device, idx) => (
+                        <tr key={idx}>
+                          <td className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b'}}>{device.ip_address}</td>
+                          <td>{new Date(device.first_seen).toLocaleString()}</td>
+                          <td>{new Date(device.last_seen).toLocaleString()}</td>
+                          <td>{device.attempt_count}</td>
+                          <td>
+                            <select 
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  registerDeviceToUser(device.ip_address, parseInt(e.target.value))
+                                  e.target.value = ''
+                                }
+                              }}
+                              className="user-select"
+                            >
+                              <option value="">Assign to user...</option>
+                              {users.map(user => (
+                                <option key={user.id} value={user.id}>
+                                  {user.display_name || user.username}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
       </main>
+
+      {/* Create User Modal */}
+      {showCreateUserModal && (
+        <div className="modal-overlay" onClick={() => setShowCreateUserModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Create New User</h2>
+            <div className="form-group">
+              <label>Username</label>
+              <input 
+                type="text" 
+                value={newUser.username}
+                onChange={(e) => setNewUser({...newUser, username: e.target.value})}
+                placeholder="Enter username (e.g., john)"
+                className="domain-input"
+              />
+            </div>
+            <div className="form-group">
+              <label>Display Name</label>
+              <input 
+                type="text" 
+                value={newUser.display_name}
+                onChange={(e) => setNewUser({...newUser, display_name: e.target.value})}
+                placeholder="Enter display name (e.g., John Doe)"
+                className="domain-input"
+              />
+            </div>
+            <div className="form-group">
+              <label>Password</label>
+              <input 
+                type="password" 
+                value={newUser.password}
+                onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                placeholder="Enter password"
+                className="domain-input"
+              />
+            </div>
+            <div className="form-actions">
+              <button onClick={() => setShowCreateUserModal(false)} className="btn btn-danger">
+                Cancel
+              </button>
+              <button onClick={createUser} className="btn btn-success">
+                Create User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

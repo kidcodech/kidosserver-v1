@@ -105,7 +105,8 @@ func main() {
 	router.HandleFunc("/api/users/{id}/blocked-domains", blockDomainForUser).Methods("POST")
 	router.HandleFunc("/api/users/{id}/blocked-domains/{domain_id}", unblockDomainForUser).Methods("DELETE")
 
-	// Auth endpoint for device registration
+	// Device registration endpoints
+	router.HandleFunc("/api/devices/unregistered", getUnregisteredDevices).Methods("GET")
 	router.HandleFunc("/api/auth/register-device", registerDevice).Methods("POST")
 
 	router.HandleFunc("/ws", handleWebSocket)
@@ -819,6 +820,9 @@ func addUserIP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Remove from unregistered devices list if it was there
+	db.ClearUnregisteredDevice(req.IPAddress)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(ip)
@@ -931,6 +935,18 @@ func unblockDomainForUser(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✓ Removed blocked domain ID: %d", domainID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// getUnregisteredDevices returns all devices trying to access internet without registration
+func getUnregisteredDevices(w http.ResponseWriter, r *http.Request) {
+	devices, err := db.GetUnregisteredDevices()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch unregistered devices: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(devices)
 }
 
 // registerDevice handles device registration from /auth page

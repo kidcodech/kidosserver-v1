@@ -73,10 +73,19 @@ func runMigrations() error {
 		UNIQUE(user_id, domain)
 	);
 
+	CREATE TABLE IF NOT EXISTS unregistered_devices (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		ip_address TEXT UNIQUE NOT NULL,
+		first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+		attempt_count INTEGER DEFAULT 1
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_ips_ip ON user_ips(ip_address);
 	CREATE INDEX IF NOT EXISTS idx_user_ips_user_id ON user_ips(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_user_id ON user_blocked_domains(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_lookup ON user_blocked_domains(user_id, domain);
+	CREATE INDEX IF NOT EXISTS idx_unregistered_devices_ip ON unregistered_devices(ip_address);
 	`
 
 	_, err := DB.Exec(schema)

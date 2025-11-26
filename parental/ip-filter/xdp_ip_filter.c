@@ -34,6 +34,15 @@ struct {
     __type(value, __u64);
 } stats SEC(".maps");
 
+// Map to track dropped (unregistered) IP addresses
+// Key: IPv4 address, Value: packet count
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1000);
+    __type(key, __u32);
+    __type(value, __u64);
+} dropped_ips SEC(".maps");
+
 // XDP socket map for DNS packet redirection to userspace (shared with DNS inspector)
 struct {
     __uint(type, BPF_MAP_TYPE_XSKMAP);
@@ -123,6 +132,15 @@ int xdp_ip_filter_prog(struct xdp_md *ctx)
     __u64 *count = bpf_map_lookup_elem(&stats, &stat_key);
     if (count) {
         __sync_fetch_and_add(count, 1);
+    }
+
+    // Track this dropped IP address
+    __u64 *ip_count = bpf_map_lookup_elem(&dropped_ips, &src_ip);
+    if (ip_count) {
+        __sync_fetch_and_add(ip_count, 1);
+    } else {
+        __u64 initial = 1;
+        bpf_map_update_elem(&dropped_ips, &src_ip, &initial, BPF_ANY);
     }
 
     return XDP_DROP;
