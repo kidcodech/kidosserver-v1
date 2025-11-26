@@ -25,6 +25,14 @@ type UserIP struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// BlockedDomain represents a domain blocked for a specific user
+type BlockedDomain struct {
+	ID        int       `json:"id"`
+	UserID    int       `json:"user_id"`
+	Domain    string    `json:"domain"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // UserWithIPs represents a user with all their assigned IP addresses
 type UserWithIPs struct {
 	User
@@ -55,6 +63,30 @@ func GetAllUsers() ([]UserWithIPs, error) {
 		users = append(users, u)
 	}
 	return users, nil
+}
+
+// GetUserWithIPs returns a single user with their IP addresses
+func GetUserWithIPs(id int) (*UserWithIPs, error) {
+	var u UserWithIPs
+	err := DB.QueryRow(
+		"SELECT id, username, display_name, created_at, updated_at FROM users WHERE id = ?",
+		id,
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Get IPs for this user
+	u.IPs, err = GetUserIPs(u.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &u, nil
 }
 
 // CreateUser creates a new user with hashed password
@@ -213,4 +245,89 @@ func AuthenticateUser(username, password string) (*User, error) {
 	}
 
 	return &u, nil
+}
+
+// GetUserBlockedDomains returns all blocked domains for a user
+func GetUserBlockedDomains(userID int) ([]BlockedDomain, error) {
+	rows, err := DB.Query(
+		"SELECT id, user_id, domain, created_at FROM user_blocked_domains WHERE user_id = ? ORDER BY domain",
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var domains []BlockedDomain
+	for rows.Next() {
+		var d BlockedDomain
+		if err := rows.Scan(&d.ID, &d.UserID, &d.Domain, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		domains = append(domains, d)
+	}
+	return domains, nil
+}
+
+// AddBlockedDomain blocks a domain for a specific user
+func AddBlockedDomain(userID int, domain string) (*BlockedDomain, error) {
+	result, err := DB.Exec(
+		"INSERT INTO user_blocked_domains (user_id, domain) VALUES (?, ?)",
+		userID, domain,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	id, _ := result.LastInsertId()
+
+	var d BlockedDomain
+	err = DB.QueryRow(
+		"SELECT id, user_id, domain, created_at FROM user_blocked_domains WHERE id = ?",
+		id,
+	).Scan(&d.ID, &d.UserID, &d.Domain, &d.CreatedAt)
+
+	return &d, err
+}
+
+// RemoveBlockedDomain removes a blocked domain for a user
+func RemoveBlockedDomain(domainID int) error {
+	_, err := DB.Exec("DELETE FROM user_blocked_domains WHERE id = ?", domainID)
+	return err
+}
+
+// IsBlockedForUser checks if a domain is blocked for a specific user
+func IsBlockedForUser(userID int, domain string) (bool, error) {
+	var count int
+	err := DB.QueryRow(
+		"SELECT COUNT(*) FROM user_blocked_domains WHERE user_id = ? AND domain = ?",
+		userID, domain,
+	).Scan(&count)
+
+	return count > 0, err
+}
+
+// GetAllBlockedDomainsMap returns a map of userID -> map[domain]bool for fast lookup
+func GetAllBlockedDomainsMap() (map[int]map[string]bool, error) {
+	rows, err := DB.Query("SELECT user_id, domain FROM user_blocked_domains")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	blockedMap := make(map[int]map[string]bool)
+	for rows.Next() {
+		var userID int
+		var domain string
+		if err := rows.Scan(&userID, &domain); err != nil {
+			return nil, err
+		}
+
+		if blockedMap[userID] == nil {
+			blockedMap[userID] = make(map[string]bool)
+		}
+		blockedMap[userID][domain] = true
+	}
+
+	return blockedMap, nil
 }

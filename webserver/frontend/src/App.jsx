@@ -158,6 +158,11 @@ function App() {
   const [maxHistoryLength, setMaxHistoryLength] = useState(1200) // Default, will be updated by canvas width
   const [clientIP, setClientIP] = useState('')
   const [userName, setUserName] = useState('')
+  const [users, setUsers] = useState([])
+  const [selectedUser, setSelectedUser] = useState(null)
+  const [userBlockedDomains, setUserBlockedDomains] = useState([])
+  const [newUserDomain, setNewUserDomain] = useState('')
+  const [newUserIP, setNewUserIP] = useState('')
 
   useEffect(() => {
     // Fetch initial data
@@ -165,6 +170,7 @@ function App() {
     fetchDNSRequests()
     fetchBlockedDomains()
     fetchClientInfo()
+    fetchUsers()
 
     // Auto-refresh every second
     const refreshInterval = setInterval(() => {
@@ -321,6 +327,128 @@ function App() {
     
     await blockDomain(domain)
     setNewDomain('')
+  }
+
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch('/api/users')
+      const data = await response.json()
+      setUsers(data || [])
+    } catch (error) {
+      console.error('Error fetching users:', error)
+    }
+  }
+
+  const fetchUserBlockedDomains = async (userId) => {
+    try {
+      const response = await fetch(`/api/users/${userId}/blocked-domains`)
+      const data = await response.json()
+      setUserBlockedDomains(data || [])
+    } catch (error) {
+      console.error('Error fetching user blocked domains:', error)
+    }
+  }
+
+  const blockDomainForUser = async (userId, domain) => {
+    try {
+      await fetch(`/api/users/${userId}/blocked-domains`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain })
+      })
+      fetchUserBlockedDomains(userId)
+    } catch (error) {
+      console.error('Error blocking domain for user:', error)
+    }
+  }
+
+  const unblockDomainForUser = async (userId, domainId) => {
+    try {
+      await fetch(`/api/users/${userId}/blocked-domains/${domainId}`, {
+        method: 'DELETE'
+      })
+      fetchUserBlockedDomains(userId)
+    } catch (error) {
+      console.error('Error unblocking domain for user:', error)
+    }
+  }
+
+  const addUserDomain = async () => {
+    if (!selectedUser) {
+      alert('Please select a user first')
+      return
+    }
+    const domain = newUserDomain.trim()
+    if (!domain) {
+      alert('Please enter a domain name')
+      return
+    }
+    
+    await blockDomainForUser(selectedUser.id, domain)
+    setNewUserDomain('')
+  }
+
+  const selectUser = (user) => {
+    setSelectedUser(user)
+    fetchUserBlockedDomains(user.id)
+  }
+
+  const addUserIP = async (userId, ipAddress) => {
+    try {
+      await fetch(`/api/users/${userId}/ips`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip_address: ipAddress })
+      })
+      await fetchUsers()
+      // Re-fetch the selected user's data
+      if (selectedUser && selectedUser.id === userId) {
+        const response = await fetch(`/api/users/${userId}`)
+        const updatedUser = await response.json()
+        setSelectedUser(updatedUser)
+      }
+    } catch (error) {
+      console.error('Error adding IP to user:', error)
+    }
+  }
+
+  const removeUserIP = async (userId, ipId) => {
+    try {
+      await fetch(`/api/users/${userId}/ips/${ipId}`, {
+        method: 'DELETE'
+      })
+      await fetchUsers()
+      // Re-fetch the selected user's data
+      if (selectedUser && selectedUser.id === userId) {
+        const response = await fetch(`/api/users/${userId}`)
+        const updatedUser = await response.json()
+        setSelectedUser(updatedUser)
+      }
+    } catch (error) {
+      console.error('Error removing IP from user:', error)
+    }
+  }
+
+  const addUserIPAddress = async () => {
+    if (!selectedUser) {
+      alert('Please select a user first')
+      return
+    }
+    const ip = newUserIP.trim()
+    if (!ip) {
+      alert('Please enter an IP address')
+      return
+    }
+    
+    // Basic IP validation
+    const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/
+    if (!ipPattern.test(ip)) {
+      alert('Please enter a valid IP address')
+      return
+    }
+    
+    await addUserIP(selectedUser.id, ip)
+    setNewUserIP('')
   }
 
   const clearPackets = async () => {
@@ -660,7 +788,164 @@ function App() {
         </>
       )}
 
-      {activeTab === 'users' && <UserManagement />}
+      {activeTab === 'users' && (
+        <>
+          <div className="controls">
+            <button onClick={fetchUsers} className="btn btn-primary">
+              🔄 Refresh Users
+            </button>
+          </div>
+
+          <div className="users-layout">
+            <div className="users-list">
+              <h2>Users</h2>
+              <div className="user-cards">
+                {users.length === 0 ? (
+                  <div className="no-data">No users found</div>
+                ) : (
+                  users.map((user) => (
+                    <div 
+                      key={user.id} 
+                      className={`user-card ${selectedUser?.id === user.id ? 'selected' : ''}`}
+                      onClick={() => selectUser(user)}
+                    >
+                      <div className="user-card-header">
+                        <span className="user-icon">👤</span>
+                        <div className="user-details">
+                          <div className="user-name">{user.display_name || user.username}</div>
+                          <div className="user-username">@{user.username}</div>
+                        </div>
+                      </div>
+                      {user.ips && user.ips.length > 0 && (
+                        <div className="user-ips">
+                          {user.ips.map((ip, idx) => (
+                            <span key={idx} className="ip-badge">{ip.ip_address}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="user-blocked-domains">
+              {selectedUser ? (
+                <>
+                  <h2>Manage {selectedUser.display_name || selectedUser.username}</h2>
+                  
+                  {/* IP Address Management */}
+                  <div className="user-section">
+                    <h3>📍 IP Addresses</h3>
+                    <div className="controls" style={{marginBottom: '1rem'}}>
+                      <div className="add-domain-form">
+                        <input 
+                          type="text" 
+                          value={newUserIP}
+                          onChange={(e) => setNewUserIP(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && addUserIPAddress()}
+                          placeholder="Enter IP address (e.g., 192.168.1.100)"
+                          className="domain-input"
+                        />
+                        <button onClick={addUserIPAddress} className="btn btn-success">
+                          ➕ Add IP
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="ip-list">
+                      {selectedUser.ips && selectedUser.ips.length > 0 ? (
+                        selectedUser.ips.map((ip) => (
+                          <div key={ip.id} className="ip-item">
+                            <span className="ip-address">{ip.ip_address}</span>
+                            <span className="ip-date">Added: {new Date(ip.created_at).toLocaleDateString()}</span>
+                            <button 
+                              onClick={() => removeUserIP(selectedUser.id, ip.id)} 
+                              className="btn btn-small btn-danger"
+                            >
+                              ❌ Remove
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="no-data">No IP addresses assigned</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Blocked Domains Management */}
+                  <div className="user-section">
+                    <h3>🚫 Blocked Domains</h3>
+                    <div className="controls" style={{marginBottom: '1rem'}}>
+                      <div className="add-domain-form">
+                        <input 
+                          type="text" 
+                          value={newUserDomain}
+                          onChange={(e) => setNewUserDomain(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && addUserDomain()}
+                          placeholder="Enter domain to block for this user"
+                          className="domain-input"
+                        />
+                        <button onClick={addUserDomain} className="btn btn-success">
+                          ➕ Add Domain
+                        </button>
+                      </div>
+                      <button onClick={() => fetchUserBlockedDomains(selectedUser.id)} className="btn btn-primary">
+                        🔄 Refresh
+                      </button>
+                    </div>
+
+                    <div className="stats-summary">
+                      <div className="stat-card">
+                        <h3>Total Blocked Domains</h3>
+                        <p className="stat-value">{userBlockedDomains.length}</p>
+                      </div>
+                    </div>
+
+                    <div className="packet-table-container">
+                      <table className="packet-table blocked-table">
+                        <thead>
+                          <tr>
+                            <th style={{width: '80%'}}>Domain</th>
+                            <th style={{width: '20%'}}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {userBlockedDomains.length === 0 ? (
+                            <tr>
+                              <td colSpan="2" className="no-data">No domains blocked for this user</td>
+                            </tr>
+                          ) : (
+                            userBlockedDomains.map((item) => (
+                            <tr key={item.id}>
+                              <td className="domain-name">{item.domain}</td>
+                              <td>
+                                <button 
+                                  onClick={() => unblockDomainForUser(selectedUser.id, item.id)} 
+                                  className="btn btn-small btn-primary"
+                                >
+                                  ✅ Unblock
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="no-user-selected">
+                <div className="no-user-icon">👈</div>
+                <h3>Select a user to manage IP addresses and blocked domains</h3>
+                <p>Choose a user from the list on the left to view and manage their settings</p>
+              </div>
+            )}
+          </div>
+          </div>
+        </>
+      )}
       </main>
     </div>
   )

@@ -3,14 +3,12 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -21,6 +19,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/kidcodech/kidosserver-v1/webserver/db"
 )
 
 // DNSRequest represents a captured DNS query
@@ -35,11 +34,12 @@ type DNSRequest struct {
 var (
 	dnsRequests        []DNSRequest
 	dnsMutex           sync.RWMutex
-	blockedDomains     map[string]bool
-	blockedMutex       sync.RWMutex
+	userBlockedDomains map[int]map[string]bool // userID -> domain -> blocked
+	userIPMap          map[string]int          // ipAddress -> userID
+	blockingMutex      sync.RWMutex
 	captivePortalIP    string
-	blockedDomainsFile = "/tmp/kidos-blocked-domains.json"
 	kidosIP            string // IP address for kidos domain, loaded from config
+	domainSyncInterval = 10 * time.Second
 )
 
 func loadKidosIP() {
@@ -66,50 +66,86 @@ func loadKidosIP() {
 	log.Fatalf("BR1_IP not found in config file %s", configFile)
 }
 
-func loadBlockedDomains() {
-	data, err := ioutil.ReadFile(blockedDomainsFile)
+// syncBlockedDomainsFromDB loads per-user blocked domains from database
+func syncBlockedDomainsFromDB() {
+	// Get all blocked domains organized by user
+	blockedMap, err := db.GetAllBlockedDomainsMap()
 	if err != nil {
-		if os.IsNotExist(err) {
-			log.Printf("No existing blocked domains file found, starting fresh")
-			return
+		log.Printf("Error loading blocked domains from database: %v", err)
+		return
+	}
+
+	// Get IP to user mapping
+	ipMap := make(map[string]int)
+	rows, err := db.DB.Query("SELECT ip_address, user_id FROM user_ips")
+	if err != nil {
+		log.Printf("Error loading user IPs: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ip string
+		var userID int
+		if err := rows.Scan(&ip, &userID); err != nil {
+			log.Printf("Error scanning IP: %v", err)
+			continue
 		}
-		log.Printf("Error reading blocked domains file: %v", err)
-		return
+		ipMap[ip] = userID
 	}
 
-	var domains []string
-	if err := json.Unmarshal(data, &domains); err != nil {
-		log.Printf("Error parsing blocked domains file: %v", err)
-		return
+	// Update global maps
+	blockingMutex.Lock()
+	userBlockedDomains = blockedMap
+	userIPMap = ipMap
+	blockingMutex.Unlock()
+
+	totalDomains := 0
+	for _, domains := range blockedMap {
+		totalDomains += len(domains)
+	}
+	log.Printf("✓ Synced %d blocked domains for %d users, %d IPs mapped",
+		totalDomains, len(blockedMap), len(ipMap))
+}
+
+// startDomainSyncWorker periodically syncs blocked domains from database
+func startDomainSyncWorker() {
+	ticker := time.NewTicker(domainSyncInterval)
+	go func() {
+		for range ticker.C {
+			syncBlockedDomainsFromDB()
+		}
+	}()
+}
+
+// isBlockedForIP checks if a domain is blocked for the user associated with an IP
+func isBlockedForIP(srcIP, domain string) bool {
+	blockingMutex.RLock()
+	defer blockingMutex.RUnlock()
+
+	// Get user ID from IP
+	userID, exists := userIPMap[srcIP]
+	if !exists {
+		return false // Unknown IP, not blocked
 	}
 
-	blockedMutex.Lock()
-	for _, domain := range domains {
-		blockedDomains[domain] = true
+	// Check if domain is blocked for this user
+	if userDomains, ok := userBlockedDomains[userID]; ok {
+		return userDomains[domain]
 	}
-	blockedMutex.Unlock()
-	log.Printf("✓ Loaded %d blocked domains from file", len(domains))
+
+	return false
+}
+
+func loadBlockedDomains() {
+	// Deprecated: Now loads from database
+	log.Println("Loading per-user blocked domains from database...")
+	syncBlockedDomainsFromDB()
 }
 
 func saveBlockedDomains() {
-	blockedMutex.RLock()
-	domains := make([]string, 0, len(blockedDomains))
-	for domain := range blockedDomains {
-		domains = append(domains, domain)
-	}
-	blockedMutex.RUnlock()
-
-	data, err := json.MarshalIndent(domains, "", "  ")
-	if err != nil {
-		log.Printf("Error marshaling blocked domains: %v", err)
-		return
-	}
-
-	if err := ioutil.WriteFile(blockedDomainsFile, data, 0644); err != nil {
-		log.Printf("Error writing blocked domains file: %v", err)
-		return
-	}
-	log.Printf("✓ Saved %d blocked domains to file", len(domains))
+	// Deprecated: Now saves to database via API
+	log.Println("Note: Blocked domains are now managed per-user in database")
 }
 
 func main() {
@@ -120,10 +156,20 @@ func main() {
 	ifaceName := os.Args[1]
 	log.Printf("Starting DNS inspector on interface: %s", ifaceName)
 
-	// Initialize blocked domains map
-	blockedDomains = make(map[string]bool)
+	// Initialize database connection
+	if err := db.InitDB(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.DB.Close()
+
+	// Initialize per-user blocked domains
+	userBlockedDomains = make(map[int]map[string]bool)
+	userIPMap = make(map[string]int)
 	loadBlockedDomains()
-	log.Println("✓ Initialized blocked domains map")
+	log.Println("✓ Initialized per-user blocked domains")
+
+	// Start background sync worker
+	startDomainSyncWorker()
 
 	// Load kidos IP from network config
 	loadKidosIP()
@@ -429,6 +475,14 @@ func parseDNSPacket(data []byte) {
 func checkAndParseDNS(data []byte) (bool, string) {
 	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
+	// Extract IP layer to get source IP
+	ipLayer := packet.Layer(layers.LayerTypeIPv4)
+	if ipLayer == nil {
+		return false, ""
+	}
+	ip, _ := ipLayer.(*layers.IPv4)
+	srcIP := ip.SrcIP.String()
+
 	// Extract DNS layer
 	dnsLayer := packet.Layer(layers.LayerTypeDNS)
 	if dnsLayer == nil {
@@ -456,19 +510,29 @@ func checkAndParseDNS(data []byte) (bool, string) {
 		return true, domain
 	}
 
-	// Check if domain or any parent domain is blocked
-	blockedMutex.RLock()
-	defer blockedMutex.RUnlock()
+	// Check if domain is blocked for this source IP
+	blockingMutex.RLock()
+	defer blockingMutex.RUnlock()
+
+	// Get user ID from source IP
+	userID, exists := userIPMap[srcIP]
+	if !exists {
+		return false, domain // Unknown IP, not blocked
+	}
+
+	// Get blocked domains for this user
+	userDomains, ok := userBlockedDomains[userID]
+	if !ok {
+		return false, domain // No blocked domains for this user
+	}
 
 	// Check exact match and parent domains using normalized domain
 	parts := splitDomain(normalizedDomain)
 	for i := 0; i < len(parts); i++ {
 		checkDomain := joinDomain(parts[i:])
-		//log check domain
-		log.Printf("Checking domain: %s", checkDomain)
-		if blockedDomains[checkDomain] {
-			// debug blocked
-			log.Printf("Blocked domain detected --------------------------: %s", checkDomain)
+		log.Printf("Checking domain for user %d: %s", userID, checkDomain)
+		if userDomains[checkDomain] {
+			log.Printf("Blocked domain detected for user %d: %s", userID, checkDomain)
 			return true, domain
 		}
 
@@ -481,9 +545,9 @@ func checkAndParseDNS(data []byte) (bool, string) {
 			// Add www.
 			wwwVariant = "www." + checkDomain
 		}
-		log.Printf("Checking www variant: %s", wwwVariant)
-		if blockedDomains[wwwVariant] {
-			log.Printf("Blocked domain detected (www variant): %s", wwwVariant)
+		log.Printf("Checking www variant for user %d: %s", userID, wwwVariant)
+		if userDomains[wwwVariant] {
+			log.Printf("Blocked domain detected (www variant) for user %d: %s", userID, wwwVariant)
 			return true, domain
 		}
 	}
@@ -746,52 +810,16 @@ func handleConnection(conn net.Conn) {
 		fmt.Fprintf(conn, "]\n")
 
 	case "BLOCK_DOMAIN":
-		if len(parts) < 2 {
-			fmt.Fprintf(conn, "ERROR: missing domain\n")
-			return
-		}
-		domain := strings.TrimSpace(parts[1])
-		blockedMutex.Lock()
-		blockedDomains[domain] = true
-		blockedMutex.Unlock()
-		saveBlockedDomains()
-		log.Printf("✓ Blocked domain: %s (total blocked: %d)", domain, len(blockedDomains))
-		fmt.Fprintf(conn, "OK\n")
+		// Deprecated: Use API endpoint /api/domains/block instead
+		fmt.Fprintf(conn, "ERROR: Use API endpoint /api/domains/block for per-user blocking\n")
 
 	case "UNBLOCK_DOMAIN":
-		if len(parts) < 2 {
-			fmt.Fprintf(conn, "ERROR: missing domain\n")
-			return
-		}
-		domain := strings.TrimSpace(parts[1])
-		blockedMutex.Lock()
-		delete(blockedDomains, domain)
-		remaining := len(blockedDomains)
-		blockedMutex.Unlock()
-		saveBlockedDomains()
-		log.Printf("✓ Unblocked domain: %s (remaining blocked: %d)", domain, remaining)
-		fmt.Fprintf(conn, "OK\n")
+		// Deprecated: Use API endpoint /api/domains/unblock instead
+		fmt.Fprintf(conn, "ERROR: Use API endpoint /api/domains/unblock for per-user blocking\n")
 
 	case "GET_BLOCKED":
-		blockedMutex.RLock()
-		domains := make([]string, 0, len(blockedDomains))
-		for domain := range blockedDomains {
-			domains = append(domains, domain)
-		}
-		blockedMutex.RUnlock()
-
-		// Sort domains alphabetically
-		sort.Strings(domains)
-
-		//log.Printf("✓ Returning %d blocked domains", len(domains))
-		fmt.Fprintf(conn, "[")
-		for i, domain := range domains {
-			if i > 0 {
-				fmt.Fprintf(conn, ",")
-			}
-			fmt.Fprintf(conn, `"%s"`, domain)
-		}
-		fmt.Fprintf(conn, "]\n")
+		// Deprecated: Use API endpoint /api/users/:id/blocked-domains instead
+		fmt.Fprintf(conn, "ERROR: Use API endpoint /api/users/:id/blocked-domains for per-user blocking\n")
 
 	default:
 		// Default behavior for backward compatibility - return DNS requests

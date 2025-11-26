@@ -64,8 +64,19 @@ func runMigrations() error {
 		UNIQUE(ip_address)
 	);
 
+	CREATE TABLE IF NOT EXISTS user_blocked_domains (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		domain TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		UNIQUE(user_id, domain)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_ips_ip ON user_ips(ip_address);
 	CREATE INDEX IF NOT EXISTS idx_user_ips_user_id ON user_ips(user_id);
+	CREATE INDEX IF NOT EXISTS idx_blocked_domains_user_id ON user_blocked_domains(user_id);
+	CREATE INDEX IF NOT EXISTS idx_blocked_domains_lookup ON user_blocked_domains(user_id, domain);
 	`
 
 	_, err := DB.Exec(schema)

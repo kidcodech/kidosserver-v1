@@ -100,6 +100,11 @@ func main() {
 	router.HandleFunc("/api/users/{id}/ips/{ip_id}", deleteUserIP).Methods("DELETE")
 	router.HandleFunc("/api/users/by-ip/{ip}", getUserByIPAddress).Methods("GET")
 
+	// Per-user domain blocking endpoints
+	router.HandleFunc("/api/users/{id}/blocked-domains", getUserBlockedDomains).Methods("GET")
+	router.HandleFunc("/api/users/{id}/blocked-domains", blockDomainForUser).Methods("POST")
+	router.HandleFunc("/api/users/{id}/blocked-domains/{domain_id}", unblockDomainForUser).Methods("DELETE")
+
 	// Auth endpoint for device registration
 	router.HandleFunc("/api/auth/register-device", registerDevice).Methods("POST")
 
@@ -698,7 +703,7 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := db.GetUser(id)
+	user, err := db.GetUserWithIPs(id)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch user: %v", err), http.StatusInternalServerError)
 		return
@@ -854,6 +859,78 @@ func getUserByIPAddress(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(user)
+}
+
+// getUserBlockedDomains returns all blocked domains for a user
+func getUserBlockedDomains(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	domains, err := db.GetUserBlockedDomains(id)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch blocked domains: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(domains)
+}
+
+// blockDomainForUser blocks a domain for a specific user
+func blockDomainForUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Domain string `json:"domain"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Domain == "" {
+		http.Error(w, "Domain is required", http.StatusBadRequest)
+		return
+	}
+
+	domain, err := db.AddBlockedDomain(id, req.Domain)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to block domain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("✓ User %d blocked domain: %s", id, req.Domain)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(domain)
+}
+
+// unblockDomainForUser removes a blocked domain for a user
+func unblockDomainForUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	domainID, err := strconv.Atoi(vars["domain_id"])
+	if err != nil {
+		http.Error(w, "Invalid domain ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.RemoveBlockedDomain(domainID); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to unblock domain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("✓ Removed blocked domain ID: %d", domainID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // registerDevice handles device registration from /auth page
