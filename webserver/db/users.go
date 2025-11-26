@@ -16,11 +16,12 @@ type User struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// UserIP represents an IP address assigned to a user
-type UserIP struct {
+// UserDevice represents a MAC address assigned to a user
+type UserDevice struct {
 	ID         int       `json:"id"`
 	UserID     int       `json:"user_id"`
-	IPAddress  string    `json:"ip_address"`
+	MACAddress string    `json:"mac_address"`
+	IPAddress  string    `json:"ip_address,omitempty"`
 	DeviceName string    `json:"device_name,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 }
@@ -36,35 +37,36 @@ type BlockedDomain struct {
 // UnregisteredDevice represents a device trying to access internet without registration
 type UnregisteredDevice struct {
 	ID           int       `json:"id"`
-	IPAddress    string    `json:"ip_address"`
+	MACAddress   string    `json:"mac_address"`
+	IPAddress    string    `json:"ip_address,omitempty"`
 	FirstSeen    time.Time `json:"first_seen"`
 	LastSeen     time.Time `json:"last_seen"`
 	AttemptCount int       `json:"attempt_count"`
 }
 
-// UserWithIPs represents a user with all their assigned IP addresses
-type UserWithIPs struct {
+// UserWithDevices represents a user with all their assigned devices
+type UserWithDevices struct {
 	User
-	IPs []UserIP `json:"ips"`
+	Devices []UserDevice `json:"devices"`
 }
 
-// GetAllUsers returns all users with their IP addresses
-func GetAllUsers() ([]UserWithIPs, error) {
+// GetAllUsers returns all users with their device MAC addresses
+func GetAllUsers() ([]UserWithDevices, error) {
 	rows, err := DB.Query("SELECT id, username, display_name, created_at, updated_at FROM users ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var users []UserWithIPs
+	var users []UserWithDevices
 	for rows.Next() {
-		var u UserWithIPs
+		var u UserWithDevices
 		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 
-		// Get IPs for this user
-		u.IPs, err = GetUserIPs(u.ID)
+		// Get devices for this user
+		u.Devices, err = GetUserDevices(u.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -74,9 +76,9 @@ func GetAllUsers() ([]UserWithIPs, error) {
 	return users, nil
 }
 
-// GetUserWithIPs returns a single user with their IP addresses
-func GetUserWithIPs(id int) (*UserWithIPs, error) {
-	var u UserWithIPs
+// GetUserWithDevices returns a single user with their device MAC addresses
+func GetUserWithDevices(id int) (*UserWithDevices, error) {
+	var u UserWithDevices
 	err := DB.QueryRow(
 		"SELECT id, username, display_name, created_at, updated_at FROM users WHERE id = ?",
 		id,
@@ -89,8 +91,8 @@ func GetUserWithIPs(id int) (*UserWithIPs, error) {
 		return nil, err
 	}
 
-	// Get IPs for this user
-	u.IPs, err = GetUserIPs(u.ID)
+	// Get devices for this user
+	u.Devices, err = GetUserDevices(u.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,10 +163,10 @@ func DeleteUser(id int) error {
 	return err
 }
 
-// GetUserIPs returns all IP addresses assigned to a user
-func GetUserIPs(userID int) ([]UserIP, error) {
+// GetUserDevices returns all MAC addresses assigned to a user
+func GetUserDevices(userID int) ([]UserDevice, error) {
 	rows, err := DB.Query(
-		"SELECT id, user_id, ip_address, COALESCE(device_name, ''), created_at FROM user_ips WHERE user_id = ? ORDER BY created_at",
+		"SELECT id, user_id, mac_address, COALESCE(ip_address, ''), COALESCE(device_name, ''), created_at FROM user_devices WHERE user_id = ? ORDER BY created_at",
 		userID,
 	)
 	if err != nil {
@@ -172,22 +174,22 @@ func GetUserIPs(userID int) ([]UserIP, error) {
 	}
 	defer rows.Close()
 
-	var ips []UserIP
+	var devices []UserDevice
 	for rows.Next() {
-		var ip UserIP
-		if err := rows.Scan(&ip.ID, &ip.UserID, &ip.IPAddress, &ip.DeviceName, &ip.CreatedAt); err != nil {
+		var device UserDevice
+		if err := rows.Scan(&device.ID, &device.UserID, &device.MACAddress, &device.IPAddress, &device.DeviceName, &device.CreatedAt); err != nil {
 			return nil, err
 		}
-		ips = append(ips, ip)
+		devices = append(devices, device)
 	}
-	return ips, nil
+	return devices, nil
 }
 
-// AddUserIP adds an IP address to a user
-func AddUserIP(userID int, ipAddress, deviceName string) (*UserIP, error) {
+// AddUserDevice adds a MAC address to a user
+func AddUserDevice(userID int, macAddress, ipAddress, deviceName string) (*UserDevice, error) {
 	result, err := DB.Exec(
-		"INSERT INTO user_ips (user_id, ip_address, device_name) VALUES (?, ?, ?)",
-		userID, ipAddress, deviceName,
+		"INSERT INTO user_devices (user_id, mac_address, ip_address, device_name) VALUES (?, ?, ?, ?)",
+		userID, macAddress, ipAddress, deviceName,
 	)
 	if err != nil {
 		return nil, err
@@ -195,30 +197,29 @@ func AddUserIP(userID int, ipAddress, deviceName string) (*UserIP, error) {
 
 	id, _ := result.LastInsertId()
 
-	var ip UserIP
+	var device UserDevice
 	err = DB.QueryRow(
-		"SELECT id, user_id, ip_address, COALESCE(device_name, ''), created_at FROM user_ips WHERE id = ?",
+		"SELECT id, user_id, mac_address, COALESCE(ip_address, ''), COALESCE(device_name, ''), created_at FROM user_devices WHERE id = ?",
 		id,
-	).Scan(&ip.ID, &ip.UserID, &ip.IPAddress, &ip.DeviceName, &ip.CreatedAt)
-
-	return &ip, err
+	).Scan(&device.ID, &device.UserID, &device.MACAddress, &device.IPAddress, &device.DeviceName, &device.CreatedAt)
+	return &device, err
 }
 
-// DeleteUserIP removes an IP address assignment
-func DeleteUserIP(ipID int) error {
-	_, err := DB.Exec("DELETE FROM user_ips WHERE id = ?", ipID)
+// DeleteUserDevice removes a device assignment
+func DeleteUserDevice(deviceID int) error {
+	_, err := DB.Exec("DELETE FROM user_devices WHERE id = ?", deviceID)
 	return err
 }
 
-// GetUserByIP returns user information for a given IP address
-func GetUserByIP(ipAddress string) (*UserWithIPs, error) {
-	var u UserWithIPs
+// GetUserByMAC returns user information for a given MAC address
+func GetUserByMAC(macAddress string) (*UserWithDevices, error) {
+	var u UserWithDevices
 	err := DB.QueryRow(`
 		SELECT u.id, u.username, u.display_name, u.created_at, u.updated_at
 		FROM users u
-		JOIN user_ips ip ON u.id = ip.user_id
-		WHERE ip.ip_address = ?
-	`, ipAddress).Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
+		JOIN user_devices dev ON u.id = dev.user_id
+		WHERE dev.mac_address = ?
+	`, macAddress).Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -227,7 +228,7 @@ func GetUserByIP(ipAddress string) (*UserWithIPs, error) {
 		return nil, err
 	}
 
-	u.IPs, err = GetUserIPs(u.ID)
+	u.Devices, err = GetUserDevices(u.ID)
 	return &u, err
 }
 
@@ -342,24 +343,25 @@ func GetAllBlockedDomainsMap() (map[int]map[string]bool, error) {
 }
 
 // RecordUnregisteredDevice records or updates an unregistered device attempt
-func RecordUnregisteredDevice(ipAddress string) error {
+func RecordUnregisteredDevice(macAddress, ipAddress string) error {
 	// Try to insert, or update if exists
 	_, err := DB.Exec(`
-		INSERT INTO unregistered_devices (ip_address, first_seen, last_seen, attempt_count)
-		VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
-		ON CONFLICT(ip_address) DO UPDATE SET
+		INSERT INTO unregistered_devices (mac_address, ip_address, first_seen, last_seen, attempt_count)
+		VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
+		ON CONFLICT(mac_address) DO UPDATE SET
+			ip_address = ?,
 			last_seen = CURRENT_TIMESTAMP,
 			attempt_count = attempt_count + 1
-	`, ipAddress)
+	`, macAddress, ipAddress, ipAddress)
 	return err
 }
 
 // GetUnregisteredDevices returns all unregistered devices
 func GetUnregisteredDevices() ([]UnregisteredDevice, error) {
 	rows, err := DB.Query(`
-		SELECT id, ip_address, first_seen, last_seen, attempt_count
+		SELECT id, mac_address, COALESCE(ip_address, ''), first_seen, last_seen, attempt_count
 		FROM unregistered_devices
-		WHERE ip_address NOT IN (SELECT ip_address FROM user_ips)
+		WHERE mac_address NOT IN (SELECT mac_address FROM user_devices)
 		ORDER BY last_seen DESC
 	`)
 	if err != nil {
@@ -370,7 +372,7 @@ func GetUnregisteredDevices() ([]UnregisteredDevice, error) {
 	var devices []UnregisteredDevice
 	for rows.Next() {
 		var d UnregisteredDevice
-		if err := rows.Scan(&d.ID, &d.IPAddress, &d.FirstSeen, &d.LastSeen, &d.AttemptCount); err != nil {
+		if err := rows.Scan(&d.ID, &d.MACAddress, &d.IPAddress, &d.FirstSeen, &d.LastSeen, &d.AttemptCount); err != nil {
 			return nil, err
 		}
 		devices = append(devices, d)
@@ -379,7 +381,7 @@ func GetUnregisteredDevices() ([]UnregisteredDevice, error) {
 }
 
 // ClearUnregisteredDevice removes a device from unregistered list (called when registered)
-func ClearUnregisteredDevice(ipAddress string) error {
-	_, err := DB.Exec("DELETE FROM unregistered_devices WHERE ip_address = ?", ipAddress)
+func ClearUnregisteredDevice(macAddress string) error {
+	_, err := DB.Exec("DELETE FROM unregistered_devices WHERE mac_address = ?", macAddress)
 	return err
 }

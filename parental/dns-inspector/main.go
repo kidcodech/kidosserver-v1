@@ -35,7 +35,7 @@ var (
 	dnsRequests        []DNSRequest
 	dnsMutex           sync.RWMutex
 	userBlockedDomains map[int]map[string]bool // userID -> domain -> blocked
-	userIPMap          map[string]int          // ipAddress -> userID
+	userMACMap         map[string]int          // macAddress -> userID
 	blockingMutex      sync.RWMutex
 	captivePortalIP    string
 	kidosIP            string // IP address for kidos domain, loaded from config
@@ -75,37 +75,37 @@ func syncBlockedDomainsFromDB() {
 		return
 	}
 
-	// Get IP to user mapping
-	ipMap := make(map[string]int)
-	rows, err := db.DB.Query("SELECT ip_address, user_id FROM user_ips")
+	// Get MAC to user mapping
+	macMap := make(map[string]int)
+	rows, err := db.DB.Query("SELECT mac_address, user_id FROM user_devices")
 	if err != nil {
-		log.Printf("Error loading user IPs: %v", err)
+		log.Printf("Error loading user devices: %v", err)
 		return
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var ip string
+		var mac string
 		var userID int
-		if err := rows.Scan(&ip, &userID); err != nil {
-			log.Printf("Error scanning IP: %v", err)
+		if err := rows.Scan(&mac, &userID); err != nil {
+			log.Printf("Error scanning MAC: %v", err)
 			continue
 		}
-		ipMap[ip] = userID
+		macMap[mac] = userID
 	}
 
 	// Update global maps
 	blockingMutex.Lock()
 	userBlockedDomains = blockedMap
-	userIPMap = ipMap
+	userMACMap = macMap
 	blockingMutex.Unlock()
 
 	totalDomains := 0
 	for _, domains := range blockedMap {
 		totalDomains += len(domains)
 	}
-	log.Printf("✓ Synced %d blocked domains for %d users, %d IPs mapped",
-		totalDomains, len(blockedMap), len(ipMap))
+	log.Printf("✓ Synced %d blocked domains for %d users, %d MACs mapped",
+		totalDomains, len(blockedMap), len(macMap))
 }
 
 // startDomainSyncWorker periodically syncs blocked domains from database
@@ -118,15 +118,15 @@ func startDomainSyncWorker() {
 	}()
 }
 
-// isBlockedForIP checks if a domain is blocked for the user associated with an IP
-func isBlockedForIP(srcIP, domain string) bool {
+// isBlockedForMAC checks if a domain is blocked for the user associated with a MAC
+func isBlockedForMAC(srcMAC, domain string) bool {
 	blockingMutex.RLock()
 	defer blockingMutex.RUnlock()
 
-	// Get user ID from IP
-	userID, exists := userIPMap[srcIP]
+	// Get user ID from MAC
+	userID, exists := userMACMap[srcMAC]
 	if !exists {
-		return false // Unknown IP, not blocked
+		return false // Unknown MAC, not blocked
 	}
 
 	// Check if domain is blocked for this user
@@ -164,7 +164,7 @@ func main() {
 
 	// Initialize per-user blocked domains
 	userBlockedDomains = make(map[int]map[string]bool)
-	userIPMap = make(map[string]int)
+	userMACMap = make(map[string]int)
 	loadBlockedDomains()
 	log.Println("✓ Initialized per-user blocked domains")
 
@@ -475,13 +475,13 @@ func parseDNSPacket(data []byte) {
 func checkAndParseDNS(data []byte) (bool, string) {
 	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
-	// Extract IP layer to get source IP
-	ipLayer := packet.Layer(layers.LayerTypeIPv4)
-	if ipLayer == nil {
+	// Extract Ethernet layer to get source MAC
+	ethLayer := packet.Layer(layers.LayerTypeEthernet)
+	if ethLayer == nil {
 		return false, ""
 	}
-	ip, _ := ipLayer.(*layers.IPv4)
-	srcIP := ip.SrcIP.String()
+	eth, _ := ethLayer.(*layers.Ethernet)
+	srcMAC := eth.SrcMAC.String()
 
 	// Extract DNS layer
 	dnsLayer := packet.Layer(layers.LayerTypeDNS)
@@ -510,14 +510,14 @@ func checkAndParseDNS(data []byte) (bool, string) {
 		return true, domain
 	}
 
-	// Check if domain is blocked for this source IP
+	// Check if domain is blocked for this source MAC
 	blockingMutex.RLock()
 	defer blockingMutex.RUnlock()
 
-	// Get user ID from source IP
-	userID, exists := userIPMap[srcIP]
+	// Get user ID from source MAC
+	userID, exists := userMACMap[srcMAC]
 	if !exists {
-		return false, domain // Unknown IP, not blocked
+		return false, domain // Unknown MAC, not blocked
 	}
 
 	// Get blocked domains for this user

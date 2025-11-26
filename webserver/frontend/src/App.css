@@ -356,6 +356,21 @@ body {
   width: 100%;
 }
 
+.packet-table thead th {
+  flex: 1;
+  min-width: 0;
+  padding: 1rem;
+  text-align: center;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .packet-table tbody {
   display: block;
   overflow-y: auto;
@@ -422,57 +437,31 @@ body {
 }
 
 .packet-table th {
+  flex: 1;
+  min-width: 0;
   padding: 1rem;
   text-align: center;
+  color: #fff;
   font-weight: 600;
-  color: #646cff;
-  border-bottom: 2px solid #646cff;
-  font-size: 1rem;
-  background: #2a2a2a;
-  flex-shrink: 0;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.packet-table th:nth-child(1),
-.packet-table td:nth-child(1) {
-  flex: 0 0 25%;
-  min-width: 200px;
-}
-
-.packet-table th:nth-child(2),
-.packet-table td:nth-child(2) {
-  flex: 0 0 25%;
-  min-width: 200px;
-}
-
-.packet-table th:nth-child(3),
-.packet-table td:nth-child(3) {
-  flex: 0 0 15%;
-  min-width: 120px;
-}
-
-.packet-table th:nth-child(4),
-.packet-table td:nth-child(4) {
-  flex: 0 0 15%;
-  min-width: 120px;
-}
-
-.packet-table th:nth-child(5),
-.packet-table td:nth-child(5) {
-  flex: 0 0 20%;
-  min-width: 120px;
+  border-bottom: 2px solid #646cff;
+  background: #2a2a2a;
 }
 
 .packet-table td {
+  flex: 1;
+  min-width: 0;
   padding: 1rem;
   border-bottom: 1px solid #333;
   color: #e0e0e0;
   font-size: 0.95rem;
   font-weight: 500;
   text-align: center;
-  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

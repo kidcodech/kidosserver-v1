@@ -95,10 +95,10 @@ func main() {
 	router.HandleFunc("/api/users/{id}", getUser).Methods("GET")
 	router.HandleFunc("/api/users/{id}", updateUser).Methods("PUT")
 	router.HandleFunc("/api/users/{id}", deleteUser).Methods("DELETE")
-	router.HandleFunc("/api/users/{id}/ips", getUserIPs).Methods("GET")
-	router.HandleFunc("/api/users/{id}/ips", addUserIP).Methods("POST")
-	router.HandleFunc("/api/users/{id}/ips/{ip_id}", deleteUserIP).Methods("DELETE")
-	router.HandleFunc("/api/users/by-ip/{ip}", getUserByIPAddress).Methods("GET")
+	router.HandleFunc("/api/users/{id}/devices", getUserDevices).Methods("GET")
+	router.HandleFunc("/api/users/{id}/devices", addUserDevice).Methods("POST")
+	router.HandleFunc("/api/users/{id}/devices/{device_id}", deleteUserDevice).Methods("DELETE")
+	router.HandleFunc("/api/users/by-mac/{mac}", getUserByMACAddress).Methods("GET")
 
 	// Per-user domain blocking endpoints
 	router.HandleFunc("/api/users/{id}/blocked-domains", getUserBlockedDomains).Methods("GET")
@@ -318,18 +318,23 @@ func getBlockedDomains(w http.ResponseWriter, r *http.Request) {
 func getClientInfo(w http.ResponseWriter, r *http.Request) {
 	clientIP := extractClientIP(r)
 
-	// Look up user by IP
-	user, _ := db.GetUserByIP(clientIP)
+	// Get MAC address from IP
+	clientMAC, err := getMACFromIP(clientIP)
 
 	info := map[string]interface{}{
 		"ip":     clientIP,
 		"server": serverIP,
 	}
 
-	if user != nil {
-		info["user"] = map[string]string{
-			"username":     user.Username,
-			"display_name": user.DisplayName,
+	if err == nil {
+		info["mac"] = clientMAC
+		// Look up user by MAC
+		user, _ := db.GetUserByMAC(clientMAC)
+		if user != nil {
+			info["user"] = map[string]string{
+				"username":     user.Username,
+				"display_name": user.DisplayName,
+			}
 		}
 	}
 
@@ -357,6 +362,34 @@ func extractClientIP(r *http.Request) string {
 	}
 
 	return clientIP
+}
+
+// getMACFromIP resolves IP address to MAC address using ARP table
+func getMACFromIP(ip string) (string, error) {
+	// Read /proc/net/arp to find MAC address for the given IP
+	file, err := ioutil.ReadFile("/proc/net/arp")
+	if err != nil {
+		return "", fmt.Errorf("failed to read ARP table: %v", err)
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(file)))
+	// Skip header line
+	scanner.Scan()
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) >= 4 {
+			arpIP := fields[0]
+			macAddr := fields[3]
+
+			if arpIP == ip && macAddr != "00:00:00:00:00:00" {
+				return strings.ToLower(macAddr), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("MAC address not found for IP: %s", ip)
 }
 
 // serveBlockedPage serves the captive portal page for blocked domains
@@ -704,7 +737,7 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := db.GetUserWithIPs(id)
+	user, err := db.GetUserWithDevices(id)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch user: %v", err), http.StatusInternalServerError)
 		return
@@ -771,8 +804,8 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// getUserIPs returns all IP addresses for a user
-func getUserIPs(w http.ResponseWriter, r *http.Request) {
+// getUserDevices returns all MAC addresses for a user
+func getUserDevices(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -780,18 +813,18 @@ func getUserIPs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ips, err := db.GetUserIPs(id)
+	devices, err := db.GetUserDevices(id)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to fetch IPs: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to fetch devices: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ips)
+	json.NewEncoder(w).Encode(devices)
 }
 
-// addUserIP adds an IP address to a user
-func addUserIP(w http.ResponseWriter, r *http.Request) {
+// addUserDevice adds a MAC address to a user
+func addUserDevice(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -800,6 +833,7 @@ func addUserIP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		MACAddress string `json:"mac_address"`
 		IPAddress  string `json:"ip_address"`
 		DeviceName string `json:"device_name"`
 	}
@@ -809,55 +843,55 @@ func addUserIP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.IPAddress == "" {
-		http.Error(w, "ip_address is required", http.StatusBadRequest)
+	if req.MACAddress == "" {
+		http.Error(w, "mac_address is required", http.StatusBadRequest)
 		return
 	}
 
-	ip, err := db.AddUserIP(id, req.IPAddress, req.DeviceName)
+	device, err := db.AddUserDevice(id, req.MACAddress, req.IPAddress, req.DeviceName)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to add IP: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to add device: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Remove from unregistered devices list if it was there
-	db.ClearUnregisteredDevice(req.IPAddress)
+	db.ClearUnregisteredDevice(req.MACAddress)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(ip)
+	json.NewEncoder(w).Encode(device)
 }
 
-// deleteUserIP removes an IP address from a user
-func deleteUserIP(w http.ResponseWriter, r *http.Request) {
+// deleteUserDevice removes a device from a user
+func deleteUserDevice(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	ipID, err := strconv.Atoi(vars["ip_id"])
+	deviceID, err := strconv.Atoi(vars["device_id"])
 	if err != nil {
-		http.Error(w, "Invalid IP ID", http.StatusBadRequest)
+		http.Error(w, "Invalid device ID", http.StatusBadRequest)
 		return
 	}
 
-	if err := db.DeleteUserIP(ipID); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to delete IP: %v", err), http.StatusInternalServerError)
+	if err := db.DeleteUserDevice(deviceID); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete device: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// getUserByIPAddress returns user information for a given IP address
-func getUserByIPAddress(w http.ResponseWriter, r *http.Request) {
+// getUserByMACAddress returns user information for a given MAC address
+func getUserByMACAddress(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	ipAddress := vars["ip"]
+	macAddress := vars["mac"]
 
-	user, err := db.GetUserByIP(ipAddress)
+	user, err := db.GetUserByMAC(macAddress)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch user: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	if user == nil {
-		http.Error(w, "No user found for this IP", http.StatusNotFound)
+		http.Error(w, "No user found for this MAC", http.StatusNotFound)
 		return
 	}
 
@@ -967,8 +1001,17 @@ func registerDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get client IP
+	// Get client IP and resolve to MAC
 	clientIP := extractClientIP(r)
+	clientMAC, err := getMACFromIP(clientIP)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("Could not determine device MAC address: %v", err),
+		})
+		return
+	}
 
 	// Authenticate user
 	user, err := db.AuthenticateUser(req.Username, req.Password)
@@ -981,10 +1024,10 @@ func registerDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if IP already registered
-	existingUser, err := db.GetUserByIP(clientIP)
+	// Check if MAC already registered
+	existingUser, err := db.GetUserByMAC(clientMAC)
 	if err == nil && existingUser != nil {
-		// IP already registered
+		// MAC already registered
 		if existingUser.ID == user.ID {
 			// Same user, already registered
 			w.Header().Set("Content-Type", "application/json")
@@ -995,23 +1038,23 @@ func registerDevice(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		} else {
-			// IP registered to different user - conflict
+			// MAC registered to different user - conflict
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]string{
-				"error": fmt.Sprintf("This IP address is already registered to user: %s", existingUser.Username),
+				"error": fmt.Sprintf("This MAC address is already registered to user: %s", existingUser.Username),
 			})
 			return
 		}
 	}
 
-	// Add IP to user's device list
+	// Add MAC to user's device list
 	deviceName := req.DeviceName
 	if deviceName == "" {
 		deviceName = "Device"
 	}
 
-	_, err = db.AddUserIP(user.ID, clientIP, deviceName)
+	_, err = db.AddUserDevice(user.ID, clientMAC, clientIP, deviceName)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to register device: %v", err), http.StatusInternalServerError)
 		return
@@ -1027,7 +1070,7 @@ func registerDevice(w http.ResponseWriter, r *http.Request) {
 		"message":            "Device registered successfully! You can now access the internet.",
 		"user_id":            user.ID,
 		"username":           user.Username,
-		"ip_address":         clientIP,
+		"mac_address":        clientMAC,
 	})
 }
 

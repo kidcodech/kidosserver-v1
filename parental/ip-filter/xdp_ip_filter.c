@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
-// XDP IP Filter - Allows only registered client IPs
+// XDP MAC Filter - Allows only registered client MAC addresses
 //
-// This XDP program filters traffic based on source IP addresses.
-// Only IPs present in the allowed_ips map can pass through.
+// This XDP program filters traffic based on source MAC addresses.
+// Only MACs present in the allowed_macs map can pass through.
 // All other traffic is dropped.
 // 
 // This program is designed to be chained with DNS filter:
-// IP Filter (first) -> DNS Filter (second)
+// MAC Filter (first) -> DNS Filter (second)
 
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
@@ -16,15 +16,27 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
-// Map to store allowed client IP addresses
-// Key: IPv4 address (32-bit)
-// Value: 1 if allowed, 0 if blocked (but we'll only store allowed IPs)
+// MAC address structure for map key (6 bytes)
+struct mac_addr {
+    __u8 addr[6];
+};
+
+// Structure to store MAC + IP address info (packed to avoid alignment issues)
+struct device_info {
+    __u8 mac[6];
+    __u32 ip;
+    __u64 count;
+} __attribute__((packed));
+
+// Map to store allowed client MAC addresses
+// Key: MAC address (6 bytes)
+// Value: 1 if allowed
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 10000);  // Support up to 10k devices
-    __type(key, __u32);           // IPv4 address
-    __type(value, __u32);         // Timestamp or metadata (1 = allowed)
-} allowed_ips SEC(".maps");
+    __type(key, struct mac_addr);
+    __type(value, __u32);         // 1 = allowed
+} allowed_macs SEC(".maps");
 
 // Statistics map to track dropped packets
 struct {
@@ -34,14 +46,14 @@ struct {
     __type(value, __u64);
 } stats SEC(".maps");
 
-// Map to track dropped (unregistered) IP addresses
-// Key: IPv4 address, Value: packet count
+// Map to track dropped (unregistered) devices with MAC and IP
+// Key: MAC address, Value: device_info with IP and count
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1000);
-    __type(key, __u32);
-    __type(value, __u64);
-} dropped_ips SEC(".maps");
+    __type(key, struct mac_addr);
+    __type(value, struct device_info);
+} dropped_macs SEC(".maps");
 
 // XDP socket map for DNS packet redirection to userspace (shared with DNS inspector)
 struct {
@@ -55,7 +67,7 @@ struct {
 #define STAT_DROPPED 1
 
 SEC("xdp")
-int xdp_ip_filter_prog(struct xdp_md *ctx)
+int xdp_mac_filter_prog(struct xdp_md *ctx)
 {
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
@@ -65,11 +77,15 @@ int xdp_ip_filter_prog(struct xdp_md *ctx)
     if ((void *)(eth + 1) > data_end)
         return XDP_PASS; // Malformed packet
 
+    // Extract source MAC address
+    struct mac_addr src_mac;
+    __builtin_memcpy(src_mac.addr, eth->h_source, 6);
+
     // Block IPv6 traffic
     if (eth->h_proto == bpf_htons(ETH_P_IPV6))
         return XDP_DROP;
 
-    // Only process IPv4 packets
+    // Only process IPv4 packets for additional checks
     if (eth->h_proto != bpf_htons(ETH_P_IP))
         return XDP_PASS; // Allow non-IPv4 traffic (ARP, etc.)
 
@@ -111,14 +127,11 @@ int xdp_ip_filter_prog(struct xdp_md *ctx)
         return XDP_PASS;
     }
 
-    // Extract source IP address
-    __u32 src_ip = ip->saddr;
-
-    // Check if source IP is in the allowed list
-    __u32 *allowed = bpf_map_lookup_elem(&allowed_ips, &src_ip);
+    // Check if source MAC is in the allowed list
+    __u32 *allowed = bpf_map_lookup_elem(&allowed_macs, &src_mac);
     
     if (allowed) {
-        // IP is allowed - update stats and pass
+        // MAC is allowed - update stats and pass
         __u32 stat_key = STAT_ALLOWED;
         __u64 *count = bpf_map_lookup_elem(&stats, &stat_key);
         if (count) {
@@ -127,20 +140,26 @@ int xdp_ip_filter_prog(struct xdp_md *ctx)
         return XDP_PASS;
     }
 
-    // IP not found in allowed list - drop packet and update stats
+    // MAC not found in allowed list - drop packet and update stats
     __u32 stat_key = STAT_DROPPED;
     __u64 *count = bpf_map_lookup_elem(&stats, &stat_key);
     if (count) {
         __sync_fetch_and_add(count, 1);
     }
 
-    // Track this dropped IP address
-    __u64 *ip_count = bpf_map_lookup_elem(&dropped_ips, &src_ip);
-    if (ip_count) {
-        __sync_fetch_and_add(ip_count, 1);
+    // Track this dropped device with MAC and IP
+    struct device_info *dev_info = bpf_map_lookup_elem(&dropped_macs, &src_mac);
+    if (dev_info) {
+        // Read-modify-write since we can't use atomic on packed struct
+        dev_info->count = dev_info->count + 1;
+        // Update IP in case it changed
+        dev_info->ip = ip->saddr;
     } else {
-        __u64 initial = 1;
-        bpf_map_update_elem(&dropped_ips, &src_ip, &initial, BPF_ANY);
+        struct device_info new_dev = {};
+        __builtin_memcpy(new_dev.mac, src_mac.addr, 6);
+        new_dev.ip = ip->saddr;
+        new_dev.count = 1;
+        bpf_map_update_elem(&dropped_macs, &src_mac, &new_dev, BPF_ANY);
     }
 
     return XDP_DROP;

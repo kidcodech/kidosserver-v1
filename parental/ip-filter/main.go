@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -24,14 +23,14 @@ const (
 )
 
 var (
-	allowedIPsMap *ebpf.Map
-	droppedIPsMap *ebpf.Map
-	statsMap      *ebpf.Map
-	xsksMap       *ebpf.Map
+	allowedMACsMap *ebpf.Map
+	droppedMACsMap *ebpf.Map
+	statsMap       *ebpf.Map
+	xsksMap        *ebpf.Map
 )
 
 func main() {
-	log.Println("Starting IP Filter Sync Daemon...")
+	log.Println("Starting MAC Filter Sync Daemon...")
 
 	// Initialize database connection
 	if err := db.InitDB(); err != nil {
@@ -44,12 +43,12 @@ func main() {
 		log.Fatalf("Failed to find eBPF maps: %v", err)
 	}
 	log.Println("✓ Found all required eBPF maps")
-	defer allowedIPsMap.Close()
-	defer droppedIPsMap.Close()
+	defer allowedMACsMap.Close()
+	defer droppedMACsMap.Close()
 	defer statsMap.Close()
 
 	// Initial sync
-	if err := syncIPsFromDatabase(); err != nil {
+	if err := syncMACsFromDatabase(); err != nil {
 		log.Printf("Initial sync failed: %v", err)
 	}
 
@@ -66,11 +65,11 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			if err := syncIPsFromDatabase(); err != nil {
+			if err := syncMACsFromDatabase(); err != nil {
 				log.Printf("Sync error: %v", err)
 			}
-			if err := processDroppedIPs(); err != nil {
-				log.Printf("Process dropped IPs error: %v", err)
+			if err := processDroppedMACs(); err != nil {
+				log.Printf("Process dropped MACs error: %v", err)
 			}
 		case <-sigChan:
 			log.Println("Shutting down...")
@@ -83,7 +82,7 @@ func main() {
 func findLoadedMaps() error {
 	log.Println("Searching for already-loaded eBPF maps...")
 
-	// Search for allowed_ips map
+	// Search for allowed_macs map
 	for mapID := ebpf.MapID(10000); mapID >= 1; mapID-- {
 		m, err := ebpf.NewMapFromID(mapID)
 		if err != nil {
@@ -94,18 +93,18 @@ func findLoadedMaps() error {
 			m.Close()
 			continue
 		}
-		if info.Name == "allowed_ips" && info.Type == ebpf.Hash {
-			allowedIPsMap = m
-			log.Printf("✓ Found allowed_ips map (ID %d)", mapID)
+		if info.Name == "allowed_macs" && info.Type == ebpf.Hash {
+			allowedMACsMap = m
+			log.Printf("✓ Found allowed_macs map (ID %d)", mapID)
 			break
 		}
 		m.Close()
 	}
-	if allowedIPsMap == nil {
-		return fmt.Errorf("allowed_ips map not found - is XDP program loaded?")
+	if allowedMACsMap == nil {
+		return fmt.Errorf("allowed_macs map not found - is XDP program loaded?")
 	}
 
-	// Search for dropped_ips map
+	// Search for dropped_macs map
 	for mapID := ebpf.MapID(10000); mapID >= 1; mapID-- {
 		m, err := ebpf.NewMapFromID(mapID)
 		if err != nil {
@@ -116,15 +115,15 @@ func findLoadedMaps() error {
 			m.Close()
 			continue
 		}
-		if info.Name == "dropped_ips" && info.Type == ebpf.Hash {
-			droppedIPsMap = m
-			log.Printf("✓ Found dropped_ips map (ID %d)", mapID)
+		if info.Name == "dropped_macs" && info.Type == ebpf.Hash {
+			droppedMACsMap = m
+			log.Printf("✓ Found dropped_macs map (ID %d)", mapID)
 			break
 		}
 		m.Close()
 	}
-	if droppedIPsMap == nil {
-		return fmt.Errorf("dropped_ips map not found - is XDP program loaded?")
+	if droppedMACsMap == nil {
+		return fmt.Errorf("dropped_macs map not found - is XDP program loaded?")
 	}
 
 	// Search for stats map
@@ -174,67 +173,72 @@ func findLoadedMaps() error {
 	return nil
 }
 
-// syncIPsFromDatabase reads all allowed IPs from database and updates the eBPF map
-func syncIPsFromDatabase() error {
-	// Get all registered IP addresses from database
-	rows, err := db.DB.Query("SELECT DISTINCT ip_address FROM user_ips")
+// syncMACsFromDatabase reads all allowed MAC addresses from database and updates the eBPF map
+func syncMACsFromDatabase() error {
+	// Get all registered MAC addresses from database
+	rows, err := db.DB.Query("SELECT DISTINCT mac_address FROM user_devices")
 	if err != nil {
-		return fmt.Errorf("failed to query IPs: %w", err)
+		return fmt.Errorf("failed to query MACs: %w", err)
 	}
 	defer rows.Close()
 
-	// Collect all IPs from database
-	dbIPs := make(map[uint32]bool)
+	// Collect all MACs from database
+	dbMACs := make(map[string]bool)
 	var count int
 
 	for rows.Next() {
-		var ipStr string
-		if err := rows.Scan(&ipStr); err != nil {
-			log.Printf("Error scanning IP: %v", err)
+		var macStr string
+		if err := rows.Scan(&macStr); err != nil {
+			log.Printf("Error scanning MAC: %v", err)
 			continue
 		}
 
-		ipNum, err := ipToUint32(ipStr)
-		if err != nil {
-			log.Printf("Invalid IP address %s: %v", ipStr, err)
-			continue
-		}
-
-		dbIPs[ipNum] = true
+		dbMACs[macStr] = true
 		count++
 	}
 
-	// Get all IPs currently in the eBPF map
-	mapIPs := make(map[uint32]bool)
-	var key, value uint32
-	iter := allowedIPsMap.Iterate()
+	// Get all MACs currently in the eBPF map
+	mapMACs := make(map[string]bool)
+	var key [6]byte
+	var value uint32
+	iter := allowedMACsMap.Iterate()
 
 	for iter.Next(&key, &value) {
-		mapIPs[key] = true
+		macStr := macToString(key[:])
+		mapMACs[macStr] = true
 	}
 	if err := iter.Err(); err != nil {
 		log.Printf("Error iterating map: %v", err)
 	}
 
-	// Add new IPs to map
+	// Add new MACs to map
 	added := 0
-	for ip := range dbIPs {
-		if !mapIPs[ip] {
+	for macStr := range dbMACs {
+		if !mapMACs[macStr] {
+			macBytes, err := macToBytes(macStr)
+			if err != nil {
+				log.Printf("Invalid MAC address %s: %v", macStr, err)
+				continue
+			}
 			value := uint32(1) // Mark as allowed
-			if err := allowedIPsMap.Put(&ip, &value); err != nil {
-				log.Printf("Failed to add IP to map: %v", err)
+			if err := allowedMACsMap.Put(macBytes, &value); err != nil {
+				log.Printf("Failed to add MAC to map: %v", err)
 			} else {
 				added++
 			}
 		}
 	}
 
-	// Remove IPs that are no longer in database
+	// Remove MACs that are no longer in database
 	removed := 0
-	for ip := range mapIPs {
-		if !dbIPs[ip] {
-			if err := allowedIPsMap.Delete(&ip); err != nil {
-				log.Printf("Failed to remove IP from map: %v", err)
+	for macStr := range mapMACs {
+		if !dbMACs[macStr] {
+			macBytes, err := macToBytes(macStr)
+			if err != nil {
+				continue
+			}
+			if err := allowedMACsMap.Delete(macBytes); err != nil {
+				log.Printf("Failed to remove MAC from map: %v", err)
 			} else {
 				removed++
 			}
@@ -242,7 +246,7 @@ func syncIPsFromDatabase() error {
 	}
 
 	if added > 0 || removed > 0 {
-		log.Printf("Synced IPs: %d total, +%d added, -%d removed", count, added, removed)
+		log.Printf("Synced MACs: %d total, +%d added, -%d removed", count, added, removed)
 	}
 
 	// Log stats
@@ -251,20 +255,24 @@ func syncIPsFromDatabase() error {
 	return nil
 }
 
-// ipToUint32 converts an IP string to uint32 in network byte order
-func ipToUint32(ipStr string) (uint32, error) {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return 0, fmt.Errorf("invalid IP address")
+// macToBytes converts MAC string (AA:BB:CC:DD:EE:FF) to 6-byte array
+func macToBytes(macStr string) (*[6]byte, error) {
+	mac, err := net.ParseMAC(macStr)
+	if err != nil {
+		return nil, err
 	}
-
-	ip = ip.To4()
-	if ip == nil {
-		return 0, fmt.Errorf("not an IPv4 address")
+	if len(mac) != 6 {
+		return nil, fmt.Errorf("invalid MAC length")
 	}
+	var macBytes [6]byte
+	copy(macBytes[:], mac)
+	return &macBytes, nil
+}
 
-	// Convert to uint32 in network byte order (big endian)
-	return binary.LittleEndian.Uint32(ip), nil
+// macToString converts 6-byte MAC to string format (aa:bb:cc:dd:ee:ff)
+func macToString(mac []byte) string {
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
+		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
 }
 
 // printStats prints current filter statistics
@@ -282,37 +290,46 @@ func printStats() {
 	}
 }
 
-// processDroppedIPs reads dropped IPs from BPF map and records them in database
-func processDroppedIPs() error {
-	var key uint32
-	var count uint64
-	iter := droppedIPsMap.Iterate()
+// processDroppedMACs reads dropped MACs from BPF map and records them in database
+func processDroppedMACs() error {
+	var key [6]byte
+	// Packed struct to match C struct with __attribute__((packed))
+	var value struct {
+		Mac   [6]byte
+		IP    uint32
+		Count uint64
+	}
+	iter := droppedMACsMap.Iterate()
 
 	recorded := 0
-	for iter.Next(&key, &count) {
-		if count == 0 {
+	for iter.Next(&key, &value) {
+		if value.Count == 0 {
 			continue
 		}
 
-		// Convert IP to string
-		ipStr := uint32ToIP(key)
+		// Convert MAC to string
+		macStr := macToString(key[:])
 
-		// Record in database
-		if err := db.RecordUnregisteredDevice(ipStr); err != nil {
-			log.Printf("Failed to record unregistered device %s: %v", ipStr, err)
+		// Convert IP to string (network byte order)
+		ipStr := fmt.Sprintf("%d.%d.%d.%d",
+			byte(value.IP), byte(value.IP>>8), byte(value.IP>>16), byte(value.IP>>24))
+
+		// Record in database with IP from packet
+		if err := db.RecordUnregisteredDevice(macStr, ipStr); err != nil {
+			log.Printf("Failed to record unregistered device %s (%s): %v", macStr, ipStr, err)
 		} else {
 			recorded++
 		}
 
-		// Clear the counter for this IP (we've recorded it)
-		zero := uint64(0)
-		if err := droppedIPsMap.Put(&key, &zero); err != nil {
-			log.Printf("Failed to reset counter for %s: %v", ipStr, err)
+		// Clear the counter for this MAC (we've recorded it)
+		value.Count = 0
+		if err := droppedMACsMap.Put(&key, &value); err != nil {
+			log.Printf("Failed to reset counter for %s: %v", macStr, err)
 		}
 	}
 
 	if err := iter.Err(); err != nil {
-		return fmt.Errorf("error iterating dropped_ips map: %w", err)
+		return fmt.Errorf("error iterating dropped_macs map: %w", err)
 	}
 
 	if recorded > 0 {
@@ -320,11 +337,4 @@ func processDroppedIPs() error {
 	}
 
 	return nil
-}
-
-// uint32ToIP converts a uint32 IP to string format
-func uint32ToIP(ipNum uint32) string {
-	ip := make(net.IP, 4)
-	binary.LittleEndian.PutUint32(ip, ipNum)
-	return ip.String()
 }

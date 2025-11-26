@@ -162,7 +162,7 @@ function App() {
   const [selectedUser, setSelectedUser] = useState(null)
   const [userBlockedDomains, setUserBlockedDomains] = useState([])
   const [newUserDomain, setNewUserDomain] = useState('')
-  const [newUserIP, setNewUserIP] = useState('')
+  const [newUserMAC, setNewUserMAC] = useState('')
   const [usersSubTab, setUsersSubTab] = useState('manage')
   const [unregisteredDevices, setUnregisteredDevices] = useState([])
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
@@ -401,12 +401,12 @@ function App() {
     fetchUserBlockedDomains(user.id)
   }
 
-  const addUserIP = async (userId, ipAddress) => {
+  const addUserDevice = async (userId, macAddress) => {
     try {
-      await fetch(`/api/users/${userId}/ips`, {
+      await fetch(`/api/users/${userId}/devices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip_address: ipAddress })
+        body: JSON.stringify({ mac_address: macAddress })
       })
       await fetchUsers()
       // Re-fetch the selected user's data
@@ -416,13 +416,13 @@ function App() {
         setSelectedUser(updatedUser)
       }
     } catch (error) {
-      console.error('Error adding IP to user:', error)
+      console.error('Error adding MAC to user:', error)
     }
   }
 
-  const removeUserIP = async (userId, ipId) => {
+  const removeUserMAC = async (userId, deviceId) => {
     try {
-      await fetch(`/api/users/${userId}/ips/${ipId}`, {
+      await fetch(`/api/users/${userId}/devices/${deviceId}`, {
         method: 'DELETE'
       })
       await fetchUsers()
@@ -433,30 +433,30 @@ function App() {
         setSelectedUser(updatedUser)
       }
     } catch (error) {
-      console.error('Error removing IP from user:', error)
+      console.error('Error removing MAC from user:', error)
     }
   }
 
-  const addUserIPAddress = async () => {
+  const addUserMACAddress = async () => {
     if (!selectedUser) {
       alert('Please select a user first')
       return
     }
-    const ip = newUserIP.trim()
-    if (!ip) {
-      alert('Please enter an IP address')
+    const mac = newUserMAC.trim()
+    if (!mac) {
+      alert('Please enter a MAC address')
       return
     }
     
-    // Basic IP validation
-    const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/
-    if (!ipPattern.test(ip)) {
-      alert('Please enter a valid IP address')
+    // MAC address validation
+    const macPattern = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/
+    if (!macPattern.test(mac)) {
+      alert('Please enter a valid MAC address (e.g., aa:bb:cc:dd:ee:ff)')
       return
     }
     
-    await addUserIP(selectedUser.id, ip)
-    setNewUserIP('')
+    await addUserDevice(selectedUser.id, mac.toLowerCase())
+    setNewUserMAC('')
   }
 
   const fetchUnregisteredDevices = async () => {
@@ -469,12 +469,18 @@ function App() {
     }
   }
 
-  const registerDeviceToUser = async (ip, userId) => {
+  const registerDeviceToUser = async (mac, userId) => {
     try {
-      await fetch(`/api/users/${userId}/ips`, {
+      // Find the device to get its IP address
+      const device = unregisteredDevices.find(d => d.mac_address === mac)
+      
+      await fetch(`/api/users/${userId}/devices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip_address: ip })
+        body: JSON.stringify({ 
+          mac_address: mac,
+          ip_address: device?.ip_address || ''
+        })
       })
       fetchUnregisteredDevices()
       fetchUsers()
@@ -914,10 +920,10 @@ function App() {
                           🗑️
                         </button>
                       </div>
-                      {user.ips && user.ips.length > 0 && (
+                      {user.devices && user.devices.length > 0 && (
                         <div className="user-ips">
-                          {user.ips.map((ip, idx) => (
-                            <span key={idx} className="ip-badge">{ip.ip_address}</span>
+                          {user.devices.map((device, idx) => (
+                            <span key={idx} className="ip-badge">{device.mac_address}</span>
                           ))}
                         </div>
                       )}
@@ -932,33 +938,39 @@ function App() {
                 <>
                   <h2>Manage {selectedUser.display_name || selectedUser.username}</h2>
                   
-                  {/* IP Address Management */}
+                  {/* MAC Address Management */}
                   <div className="user-section">
-                    <h3>📍 IP Addresses</h3>
+                    <h3>📍 MAC Addresses</h3>
                     <div className="controls" style={{marginBottom: '1rem'}}>
                       <div className="add-domain-form">
                         <input 
                           type="text" 
-                          value={newUserIP}
-                          onChange={(e) => setNewUserIP(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && addUserIPAddress()}
-                          placeholder="Enter IP address (e.g., 192.168.1.100)"
+                          value={newUserMAC}
+                          onChange={(e) => setNewUserMAC(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && addUserMACAddress()}
+                          placeholder="Enter MAC address (e.g., aa:bb:cc:dd:ee:ff)"
                           className="domain-input"
+                          pattern="^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"
                         />
-                        <button onClick={addUserIPAddress} className="btn btn-success">
-                          ➕ Add IP
+                        <button onClick={addUserMACAddress} className="btn btn-success">
+                          ➕ Add MAC
                         </button>
                       </div>
                     </div>
 
                     <div className="ip-list">
-                      {selectedUser.ips && selectedUser.ips.length > 0 ? (
-                        selectedUser.ips.map((ip) => (
-                          <div key={ip.id} className="ip-item">
-                            <span className="ip-address">{ip.ip_address}</span>
-                            <span className="ip-date">Added: {new Date(ip.created_at).toLocaleDateString()}</span>
+                      {selectedUser.devices && selectedUser.devices.length > 0 ? (
+                        selectedUser.devices.map((device) => (
+                          <div key={device.id} className="ip-item">
+                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                              <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b'}}>{device.mac_address}</span>
+                              {device.ip_address && (
+                                <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#888', fontSize: '0.9rem'}}>({device.ip_address})</span>
+                              )}
+                            </div>
+                            <span className="ip-date">Added: {new Date(device.created_at).toLocaleDateString()}</span>
                             <button 
-                              onClick={() => removeUserIP(selectedUser.id, ip.id)} 
+                              onClick={() => removeUserMAC(selectedUser.id, device.id)} 
                               className="btn btn-small btn-danger"
                             >
                               ❌ Remove
@@ -1057,22 +1069,24 @@ function App() {
                 <table className="packet-table">
                   <thead>
                     <tr>
-                      <th style={{width: '25%'}}>IP Address</th>
-                      <th style={{width: '20%'}}>First Seen</th>
-                      <th style={{width: '20%'}}>Last Seen</th>
-                      <th style={{width: '15%'}}>Attempts</th>
-                      <th style={{width: '20%'}}>Action</th>
+                      <th>MAC Address</th>
+                      <th>IP Address</th>
+                      <th>First Seen</th>
+                      <th>Last Seen</th>
+                      <th>Attempts</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {unregisteredDevices.length === 0 ? (
                       <tr>
-                        <td colSpan="5" className="no-data">No unregistered devices detected</td>
+                        <td colSpan="6" className="no-data">No unregistered devices detected</td>
                       </tr>
                     ) : (
                       unregisteredDevices.map((device, idx) => (
                         <tr key={idx}>
-                          <td className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b'}}>{device.ip_address}</td>
+                          <td className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b'}}>{device.mac_address}</td>
+                          <td className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#888'}}>{device.ip_address || '-'}</td>
                           <td>{new Date(device.first_seen).toLocaleString()}</td>
                           <td>{new Date(device.last_seen).toLocaleString()}</td>
                           <td>{device.attempt_count}</td>
@@ -1080,7 +1094,7 @@ function App() {
                             <select 
                               onChange={(e) => {
                                 if (e.target.value) {
-                                  registerDeviceToUser(device.ip_address, parseInt(e.target.value))
+                                  registerDeviceToUser(device.mac_address, parseInt(e.target.value))
                                   e.target.value = ''
                                 }
                               }}

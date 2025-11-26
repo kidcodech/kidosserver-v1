@@ -54,14 +54,15 @@ func runMigrations() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
-	CREATE TABLE IF NOT EXISTS user_ips (
+	CREATE TABLE IF NOT EXISTS user_devices (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id INTEGER NOT NULL,
-		ip_address TEXT NOT NULL,
+		mac_address TEXT NOT NULL,
+		ip_address TEXT,
 		device_name TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-		UNIQUE(ip_address)
+		UNIQUE(mac_address)
 	);
 
 	CREATE TABLE IF NOT EXISTS user_blocked_domains (
@@ -75,17 +76,18 @@ func runMigrations() error {
 
 	CREATE TABLE IF NOT EXISTS unregistered_devices (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		ip_address TEXT UNIQUE NOT NULL,
+		mac_address TEXT UNIQUE NOT NULL,
+		ip_address TEXT,
 		first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		attempt_count INTEGER DEFAULT 1
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_user_ips_ip ON user_ips(ip_address);
-	CREATE INDEX IF NOT EXISTS idx_user_ips_user_id ON user_ips(user_id);
+	CREATE INDEX IF NOT EXISTS idx_user_devices_mac ON user_devices(mac_address);
+	CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_user_id ON user_blocked_domains(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_lookup ON user_blocked_domains(user_id, domain);
-	CREATE INDEX IF NOT EXISTS idx_unregistered_devices_ip ON unregistered_devices(ip_address);
+	CREATE INDEX IF NOT EXISTS idx_unregistered_devices_mac ON unregistered_devices(mac_address);
 	`
 
 	_, err := DB.Exec(schema)

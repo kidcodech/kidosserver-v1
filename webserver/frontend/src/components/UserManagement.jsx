@@ -23,7 +23,7 @@ function UserManagement() {
   }
 
   const deleteUser = async (id, username) => {
-    if (!confirm(`Delete user "${username}"? This will also remove all associated IP addresses.`)) return
+    if (!confirm(`Delete user "${username}"? This will also remove all associated MAC addresses.`)) return
     
     try {
       await fetch(`/api/users/${id}`, { method: 'DELETE' })
@@ -52,7 +52,7 @@ function UserManagement() {
         <div className="stat-card">
           <h3>Total Devices</h3>
           <p className="stat-value">
-            {users.reduce((sum, u) => sum + (u.ips?.length || 0), 0)}
+            {users.reduce((sum, u) => sum + (u.devices?.length || 0), 0)}
           </p>
         </div>
       </div>
@@ -64,7 +64,7 @@ function UserManagement() {
               <th>Username</th>
               <th>Display Name</th>
               <th>Devices</th>
-              <th>IP Addresses</th>
+              <th>MAC Addresses</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -78,18 +78,19 @@ function UserManagement() {
                 <tr key={user.id}>
                   <td className="domain-name">{user.username}</td>
                   <td>{user.display_name}</td>
-                  <td>{user.ips?.length || 0}</td>
+                  <td>{user.devices?.length || 0}</td>
                   <td>
                     <div className="ip-badges">
-                      {user.ips?.length > 0 ? (
-                        user.ips.map(ip => (
-                          <div key={ip.id} className="user-ip-badge">
-                            {ip.ip_address}
-                            {ip.device_name && <span className="device-name"> ({ip.device_name})</span>}
+                      {user.devices?.length > 0 ? (
+                        user.devices.map(device => (
+                          <div key={device.id} className="user-ip-badge">
+                            {device.mac_address}
+                            {device.ip_address && <span className="device-name" style={{color: '#888'}}> ({device.ip_address})</span>}
+                            {device.device_name && <span className="device-name"> - {device.device_name}</span>}
                           </div>
                         ))
                       ) : (
-                        <span className="no-ips">No IPs assigned</span>
+                        <span className="no-ips">No MACs assigned</span>
                       )}
                     </div>
                   </td>
@@ -105,7 +106,7 @@ function UserManagement() {
                       <button 
                         onClick={() => setShowIPModal(user)} 
                         className="btn btn-small btn-success"
-                        title="Manage IP addresses"
+                        title="Manage MAC addresses"
                       >
                         📱
                       </button>
