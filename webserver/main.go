@@ -117,8 +117,8 @@ func main() {
 	// Serve static files from frontend/dist
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./frontend/dist")))
 
-	// Wrap router with captive portal middleware
-	handler := captivePortalMiddleware(router)
+	// Wrap router with CORS and captive portal middleware
+	handler := corsMiddleware(captivePortalMiddleware(router))
 
 	// Start broadcast goroutine
 	go handleBroadcast()
@@ -190,9 +190,10 @@ func captivePortalMiddleware(next http.Handler) http.Handler {
 			host = host[:colonIndex]
 		}
 
-		// Allow requests to server IP, localhost, and kidos domain
+		// Allow requests to server IP, localhost, kidos domain, and ngrok domains
 		// Also allow if path is already /blocked or starts with /api or /ws
 		if host == serverIP || host == "localhost" || host == "127.0.0.1" || host == "kidos" ||
+			strings.HasSuffix(host, ".ngrok-free.dev") || strings.HasSuffix(host, ".ngrok.io") ||
 			r.URL.Path == "/blocked" || strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws" {
 			next.ServeHTTP(w, r)
 			return
@@ -201,6 +202,22 @@ func captivePortalMiddleware(next http.Handler) http.Handler {
 		// Unknown host (blocked domain) - redirect to captive portal
 		log.Printf("Captive portal redirect: Host=%s, Path=%s", r.Host, r.URL.Path)
 		http.Redirect(w, r, "/blocked", http.StatusFound)
+	})
+}
+
+// corsMiddleware adds CORS headers for external access
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }
 

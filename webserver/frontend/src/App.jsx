@@ -188,7 +188,8 @@ function App() {
     }, 1000)
 
     // Setup WebSocket connection
-    const websocket = new WebSocket(`ws://${window.location.host}/ws`)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const websocket = new WebSocket(`${protocol}//${window.location.host}/ws`)
     
     websocket.onopen = () => {
       console.log('WebSocket connected')
