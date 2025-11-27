@@ -114,8 +114,12 @@ func main() {
 	// Captive portal page for blocked domains
 	router.HandleFunc("/blocked", serveBlockedPage).Methods("GET")
 
-	// Serve static files from frontend/dist
-	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./frontend/dist")))
+	// Landing page - user info or device registration
+	router.HandleFunc("/", serveIndexPage).Methods("GET")
+
+	// Admin interface - serve static files from frontend/dist
+	adminRouter := router.PathPrefix("/admin").Subrouter()
+	adminRouter.PathPrefix("/").Handler(http.StripPrefix("/admin", http.FileServer(http.Dir("./frontend/dist"))))
 
 	// Wrap router with CORS and captive portal middleware
 	handler := corsMiddleware(captivePortalMiddleware(router))
@@ -191,10 +195,12 @@ func captivePortalMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Allow requests to server IP, localhost, kidos domain, and ngrok domains
-		// Also allow if path is already /blocked or starts with /api or /ws
+		// Also allow if path is already /blocked, /, or starts with /api, /admin, or /ws
 		if host == serverIP || host == "localhost" || host == "127.0.0.1" || host == "kidos" ||
 			strings.HasSuffix(host, ".ngrok-free.dev") || strings.HasSuffix(host, ".ngrok.io") ||
-			r.URL.Path == "/blocked" || strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws" {
+			r.URL.Path == "/" || r.URL.Path == "/blocked" ||
+			strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/admin") ||
+			r.URL.Path == "/ws" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -339,16 +345,20 @@ func getClientInfo(w http.ResponseWriter, r *http.Request) {
 	clientMAC, err := getMACFromIP(clientIP)
 
 	info := map[string]interface{}{
-		"ip":     clientIP,
-		"server": serverIP,
+		"ip_address":  clientIP,
+		"mac_address": "",
+		"registered":  false,
+		"user":        nil,
 	}
 
-	if err == nil {
-		info["mac"] = clientMAC
+	if err == nil && clientMAC != "" {
+		info["mac_address"] = clientMAC
 		// Look up user by MAC
 		user, _ := db.GetUserByMAC(clientMAC)
 		if user != nil {
-			info["user"] = map[string]string{
+			info["registered"] = true
+			info["user"] = map[string]interface{}{
+				"id":           user.ID,
 				"username":     user.Username,
 				"display_name": user.DisplayName,
 			}
@@ -463,6 +473,10 @@ func serveBlockedPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))
+}
+
+func serveIndexPage(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "./templates/index.html")
 }
 
 // fetchBlockedDomains fetches blocked domains list from DNS inspector

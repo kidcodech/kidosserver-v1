@@ -277,13 +277,14 @@ function App() {
   }
 
   const fetchBlockedDomains = async () => {
-    try {
-      const response = await fetch('/api/dns/blocked')
-      const data = await response.json()
-      setBlockedDomains(data || [])
-    } catch (error) {
-      console.error('Error fetching blocked domains:', error)
-    }
+    // Temporarily disabled - DNS inspector communication issues
+    // try {
+    //   const response = await fetch('/api/dns/blocked')
+    //   const data = await response.json()
+    //   setBlockedDomains(data || [])
+    // } catch (error) {
+    //   console.error('Error fetching blocked domains:', error)
+    // }
   }
 
   const fetchClientInfo = async () => {

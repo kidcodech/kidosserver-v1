@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kidos - Parental Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+        
+        .container {
+            max-width: 500px;
+            width: 90%;
+            background: rgba(42, 42, 42, 0.9);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(100, 108, 255, 0.2);
+        }
+        
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: #646cff;
+            text-align: center;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 2rem;
+            font-size: 0.9rem;
+        }
+        
+        .info-card {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid #333;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #333;
+        }
+        
+        .info-row:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+        
+        .info-label {
+            color: #888;
+            font-weight: 600;
+        }
+        
+        .info-value {
+            color: #fff;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .status-registered {
+            background: #4ade80;
+            color: #000;
+        }
+        
+        .status-unregistered {
+            background: #f59e0b;
+            color: #000;
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #888;
+            font-weight: 600;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 0.75rem;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: #646cff;
+        }
+        
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            background: #646cff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #535bf2;
+        }
+        
+        button:disabled {
+            background: #333;
+            cursor: not-allowed;
+        }
+        
+        .message {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        
+        .message.error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+        }
+        
+        .message.success {
+            background: rgba(74, 222, 128, 0.2);
+            border: 1px solid #4ade80;
+            color: #86efac;
+        }
+        
+        .admin-link {
+            text-align: center;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #333;
+        }
+        
+        .admin-link a {
+            color: #646cff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .admin-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ Kidos</h1>
+        <p class="subtitle">Parental Control System</p>
+        
+        <div id="content">
+            <div class="info-card" style="text-align: center; padding: 3rem 1.5rem;">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">⏳</div>
+                <div style="color: #888;">Loading device information...</div>
+            </div>
+        </div>
+        
+        <div class="admin-link">
+            <a href="/admin/">Administrator Panel</a>
+        </div>
+    </div>
+    
+    <script>
+        let userData = null;
+        let users = [];
+        
+        async function loadDeviceInfo() {
+            try {
+                const response = await fetch('/api/client/info');
+                const data = await response.json();
+                
+                if (data.registered && data.user) {
+                    showUserInfo(data);
+                } else {
+                    await loadUsers();
+                    showRegistrationForm(data);
+                }
+            } catch (error) {
+                showError('Failed to load device information');
+            }
+        }
+        
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/users');
+                users = await response.json();
+            } catch (error) {
+                console.error('Failed to load users:', error);
+            }
+        }
+        
+        function showUserInfo(data) {
+            document.getElementById('content').innerHTML = `
+                <div class="info-card">
+                    <div class="info-row">
+                        <span class="info-label">Status</span>
+                        <span class="status-badge status-registered">✓ Registered</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">User</span>
+                        <span class="info-value">${data.user.display_name || data.user.username}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">MAC Address</span>
+                        <span class="info-value">${data.mac_address}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">IP Address</span>
+                        <span class="info-value">${data.ip_address}</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function showRegistrationForm(data) {
+            document.getElementById('content').innerHTML = `
+                <div class="info-card">
+                    <div class="info-row">
+                        <span class="info-label">Status</span>
+                        <span class="status-badge status-unregistered">! Unregistered</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">MAC Address</span>
+                        <span class="info-value">${data.mac_address}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">IP Address</span>
+                        <span class="info-value">${data.ip_address}</span>
+                    </div>
+                </div>
+                
+                <div id="message"></div>
+                
+                <form id="registerForm" onsubmit="handleRegistration(event)">
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" required placeholder="Enter your username">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" required placeholder="Enter your password">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="deviceName">Device Name (Optional)</label>
+                        <input type="text" id="deviceName" placeholder="e.g., John's Phone">
+                    </div>
+                    
+                    <button type="submit">Register Device</button>
+                </form>
+            `;
+            
+            userData = data;
+        }
+        
+        async function handleRegistration(event) {
+            event.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const deviceName = document.getElementById('deviceName').value;
+            const submitButton = event.target.querySelector('button');
+            
+            submitButton.disabled = true;
+            submitButton.textContent = 'Authenticating...';
+            
+            try {
+                // First, authenticate user
+                const authResponse = await fetch('/api/auth/register-device', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        device_name: deviceName
+                    })
+                });
+                
+                if (authResponse.ok) {
+                    showMessage('Device registered successfully! Reloading...', 'success');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    const error = await authResponse.text();
+                    showMessage(`Registration failed: ${error}`, 'error');
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Register Device';
+                }
+            } catch (error) {
+                showMessage('Registration failed: ' + error.message, 'error');
+                submitButton.disabled = false;
+                submitButton.textContent = 'Register Device';
+            }
+        }
+        
+        function showMessage(text, type) {
+            document.getElementById('message').innerHTML = `
+                <div class="message ${type}">${text}</div>
+            `;
+        }
+        
+        function showError(text) {
+            document.getElementById('content').innerHTML = `
+                <div class="message error">${text}</div>
+            `;
+        }
+        
+        loadDeviceInfo();
+    </script>
+</body>
+</html>
