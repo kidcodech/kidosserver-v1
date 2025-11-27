@@ -167,6 +167,7 @@ function App() {
   const [unregisteredDevices, setUnregisteredDevices] = useState([])
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
   const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '' })
+  const [systemHealth, setSystemHealth] = useState(null)
 
   useEffect(() => {
     // Fetch initial data
@@ -471,6 +472,16 @@ function App() {
     }
   }
 
+  const fetchSystemHealth = async () => {
+    try {
+      const response = await fetch('/api/system/health')
+      const data = await response.json()
+      setSystemHealth(data)
+    } catch (error) {
+      console.error('Error fetching system health:', error)
+    }
+  }
+
   const registerDeviceToUser = async (mac, userId) => {
     try {
       // Find the device to get its IP address
@@ -612,6 +623,13 @@ function App() {
           >
             <span className="nav-icon">👥</span>
             <span className="nav-text">Users</span>
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'system' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('system'); fetchSystemHealth(); }}
+          >
+            <span className="nav-icon">⚙️</span>
+            <span className="nav-text">System Health</span>
           </button>
         </nav>
       </aside>
@@ -1117,6 +1135,54 @@ function App() {
                 </table>
               </div>
             </div>
+          )}
+        </>
+      )}
+
+      {activeTab === 'system' && (
+        <>
+          <div className="controls">
+            <h2>System Health</h2>
+            <button onClick={fetchSystemHealth} className="btn btn-primary">
+              🔄 Refresh
+            </button>
+          </div>
+
+          {systemHealth ? (
+            <div className="stats-summary">
+              <div className="stat-card">
+                <h3>CPU Usage</h3>
+                <p className="stat-value">{systemHealth.cpu_usage || 'N/A'}%</p>
+              </div>
+              <div className="stat-card">
+                <h3>Memory</h3>
+                <p className="stat-value">{systemHealth.memory_usage || 'N/A'}%</p>
+                <p style={{fontSize: '0.85rem', color: '#888', marginTop: '0.5rem'}}>
+                  {systemHealth.memory_used} / {systemHealth.memory_total}
+                </p>
+              </div>
+              <div className="stat-card">
+                <h3>Disk Usage</h3>
+                <p className="stat-value">{systemHealth.disk_usage || 'N/A'}</p>
+                <p style={{fontSize: '0.85rem', color: '#888', marginTop: '0.5rem'}}>
+                  {systemHealth.disk_used} / {systemHealth.disk_total}
+                </p>
+              </div>
+              <div className="stat-card">
+                <h3>Network Status</h3>
+                <p className="stat-value">
+                  {systemHealth.network_online ? '🟢 Online' : '🔴 Offline'}
+                </p>
+              </div>
+              <div className="stat-card">
+                <h3>System Uptime</h3>
+                <p className="stat-value" style={{fontSize: '1rem'}}>
+                  {systemHealth.uptime || 'N/A'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="no-data">Loading system information...</div>
           )}
         </>
       )}

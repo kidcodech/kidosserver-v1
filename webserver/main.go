@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -88,6 +89,7 @@ func main() {
 	router.HandleFunc("/api/dns/unblock", unblockDomain).Methods("POST")
 	router.HandleFunc("/api/dns/blocked", getBlockedDomains).Methods("GET")
 	router.HandleFunc("/api/client/info", getClientInfo).Methods("GET")
+	router.HandleFunc("/api/system/health", getSystemHealth).Methods("GET")
 
 	// User management endpoints
 	router.HandleFunc("/api/users", getUsers).Methods("GET")
@@ -367,6 +369,62 @@ func getClientInfo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
+}
+
+// getSystemHealth returns system resource usage statistics
+func getSystemHealth(w http.ResponseWriter, r *http.Request) {
+	health := map[string]interface{}{}
+
+	// CPU usage
+	cpuUsage, err := exec.Command("sh", "-c", "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'").Output()
+	if err == nil {
+		health["cpu_usage"] = strings.TrimSpace(string(cpuUsage))
+	}
+
+	// Memory usage
+	memInfo, err := exec.Command("sh", "-c", "free -m | awk 'NR==2{printf \"%.2f\", $3*100/$2 }'").Output()
+	if err == nil {
+		health["memory_usage"] = strings.TrimSpace(string(memInfo))
+	}
+
+	memTotal, err := exec.Command("sh", "-c", "free -h | awk 'NR==2{print $2}'").Output()
+	if err == nil {
+		health["memory_total"] = strings.TrimSpace(string(memTotal))
+	}
+
+	memUsed, err := exec.Command("sh", "-c", "free -h | awk 'NR==2{print $3}'").Output()
+	if err == nil {
+		health["memory_used"] = strings.TrimSpace(string(memUsed))
+	}
+
+	// Disk usage
+	diskUsage, err := exec.Command("sh", "-c", "df -h / | awk 'NR==2{print $5}'").Output()
+	if err == nil {
+		health["disk_usage"] = strings.TrimSpace(string(diskUsage))
+	}
+
+	diskTotal, err := exec.Command("sh", "-c", "df -h / | awk 'NR==2{print $2}' | sed 's/G/Gi/g'").Output()
+	if err == nil {
+		health["disk_total"] = strings.TrimSpace(string(diskTotal))
+	}
+
+	diskUsed, err := exec.Command("sh", "-c", "df -h / | awk 'NR==2{print $3}' | sed 's/G/Gi/g'").Output()
+	if err == nil {
+		health["disk_used"] = strings.TrimSpace(string(diskUsed))
+	}
+
+	// Network status - check if default route exists
+	_, err = exec.Command("sh", "-c", "ip route | grep default").Output()
+	health["network_online"] = err == nil
+
+	// Uptime
+	uptime, err := exec.Command("sh", "-c", "uptime -p").Output()
+	if err == nil {
+		health["uptime"] = strings.TrimSpace(string(uptime))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(health)
 }
 
 // extractClientIP extracts the client IP from the request
