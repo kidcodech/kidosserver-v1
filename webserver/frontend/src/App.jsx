@@ -177,6 +177,7 @@ function App() {
   const [unregisteredDevices, setUnregisteredDevices] = useState([])
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
   const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '' })
+  const [newPassword, setNewPassword] = useState('')
   const [systemHealth, setSystemHealth] = useState(null)
 
   useEffect(() => {
@@ -589,6 +590,37 @@ function App() {
       fetchUsers()
     } catch (error) {
       console.error('Error deleting user:', error)
+    }
+  }
+
+  const updateUserPassword = async () => {
+    if (!selectedUser) return
+    if (!newPassword) {
+      alert('Please enter a new password')
+      return
+    }
+    
+    try {
+      const response = await fetch(`/api/users/${selectedUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: selectedUser.username,
+          display_name: selectedUser.display_name,
+          password: newPassword
+        })
+      })
+      
+      if (response.ok) {
+        alert('Password updated successfully')
+        setNewPassword('')
+      } else {
+        const error = await response.text()
+        alert(`Failed to update password: ${error}`)
+      }
+    } catch (error) {
+      console.error('Error updating password:', error)
+      alert('Failed to update password')
     }
   }
 
@@ -1056,6 +1088,25 @@ function App() {
                 <>
                   <h2>Manage {selectedUser.display_name || selectedUser.username}</h2>
                   
+                  {/* User Settings */}
+                  <div className="user-section">
+                    <h3>⚙️ User Settings</h3>
+                    <div className="controls" style={{marginBottom: '1rem'}}>
+                      <div className="add-domain-form">
+                        <input 
+                          type="password" 
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="New Password"
+                          className="domain-input"
+                        />
+                        <button onClick={updateUserPassword} className="btn btn-primary">
+                          🔑 Change Password
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* MAC Address Management */}
                   <div className="user-section">
                     <h3>📍 MAC Addresses</h3>
