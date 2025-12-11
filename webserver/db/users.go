@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -281,6 +282,9 @@ func GetUserBlockedDomains(userID int) ([]BlockedDomain, error) {
 
 // AddBlockedDomain blocks a domain for a specific user
 func AddBlockedDomain(userID int, domain string) (*BlockedDomain, error) {
+	// Normalize domain: lowercase and remove trailing dot
+	domain = strings.TrimSuffix(strings.ToLower(domain), ".")
+
 	result, err := DB.Exec(
 		"INSERT INTO user_blocked_domains (user_id, domain) VALUES (?, ?)",
 		userID, domain,
@@ -336,7 +340,9 @@ func GetAllBlockedDomainsMap() (map[int]map[string]bool, error) {
 		if blockedMap[userID] == nil {
 			blockedMap[userID] = make(map[string]bool)
 		}
-		blockedMap[userID][domain] = true
+		// Normalize domain from DB
+		normalized := strings.TrimSuffix(strings.ToLower(domain), ".")
+		blockedMap[userID][normalized] = true
 	}
 
 	return blockedMap, nil

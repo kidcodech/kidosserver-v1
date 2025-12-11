@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"html"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -205,10 +206,11 @@ func captivePortalMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Allow requests to server IP, localhost, kidos domain, and ngrok domains
-		// Also allow if path is already /blocked, /, or starts with /api, /admin, or /ws
+		// Also allow if path is already /blocked, or starts with /api, /admin, or /ws
+		// Note: We do NOT allow "/" for unknown hosts, so they get redirected to /blocked
 		if host == serverIP || host == "localhost" || host == "127.0.0.1" || host == "kidos" ||
 			strings.HasSuffix(host, ".ngrok-free.dev") || strings.HasSuffix(host, ".ngrok.io") ||
-			r.URL.Path == "/" || r.URL.Path == "/blocked" ||
+			r.URL.Path == "/blocked" ||
 			strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/admin") ||
 			r.URL.Path == "/ws" {
 			next.ServeHTTP(w, r)
@@ -217,7 +219,9 @@ func captivePortalMiddleware(next http.Handler) http.Handler {
 
 		// Unknown host (blocked domain) - redirect to captive portal
 		log.Printf("Captive portal redirect: Host=%s, Path=%s", r.Host, r.URL.Path)
-		http.Redirect(w, r, "/blocked", http.StatusFound)
+		// Redirect to absolute URL to change the browser address bar
+		targetURL := fmt.Sprintf("http://kidos/blocked?domain=%s", host)
+		http.Redirect(w, r, targetURL, http.StatusFound)
 	})
 }
 
@@ -552,58 +556,106 @@ func getMACFromIP(ip string) (string, error) {
 
 // serveBlockedPage serves the captive portal page for blocked domains
 func serveBlockedPage(w http.ResponseWriter, r *http.Request) {
-	html := `<!DOCTYPE html>
-<html>
+	domain := r.URL.Query().Get("domain")
+	domainText := "This website"
+	if domain != "" {
+		domainText = fmt.Sprintf("<strong>%s</strong>", html.EscapeString(domain))
+	}
+
+	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Domain Blocked</title>
+    <title>Access Denied - Kidos</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        * {
             margin: 0;
             padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%%, #16213e 100%%);
             min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
         }
+        
         .container {
-            background: white;
-            border-radius: 12px;
-            padding: 3rem;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            text-align: center;
             max-width: 500px;
+            width: 90%%;
+            background: rgba(42, 42, 42, 0.9);
+            border-radius: 16px;
+            padding: 3rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(100, 108, 255, 0.2);
+            text-align: center;
         }
+        
         h1 {
-            color: #e53e3e;
-            font-size: 2.5rem;
+            font-size: 2rem;
             margin-bottom: 1rem;
+            color: #ef4444;
         }
+        
         p {
-            color: #4a5568;
+            color: #ccc;
             font-size: 1.1rem;
             line-height: 1.6;
+            margin-bottom: 2rem;
+            word-break: break-word;
+            overflow-wrap: break-word;
         }
+        
         .icon {
             font-size: 4rem;
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
+            display: inline-block;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%% { transform: scale(1); }
+            50%% { transform: scale(1.1); }
+            100%% { transform: scale(1); }
+        }
+
+        .dashboard-link {
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #333;
+        }
+        
+        .dashboard-link a {
+            color: #646cff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .dashboard-link a:hover {
+            text-decoration: underline;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="icon">🚫</div>
-        <h1>Domain Blocked</h1>
-        <p>This domain has been blocked by parental controls.</p>
+        <h1>Access Denied</h1>
+        <p>%s has been blocked by Kidos parental controls.</p>
+        <div class="dashboard-link">
+            <a href="http://kidos/">Dashboard</a>
+        </div>
     </div>
 </body>
-</html>`
+</html>`, domainText)
+
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(html))
+	w.Write([]byte(htmlContent))
 }
 
 func serveIndexPage(w http.ResponseWriter, r *http.Request) {

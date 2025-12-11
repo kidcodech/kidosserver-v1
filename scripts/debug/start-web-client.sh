@@ -175,6 +175,8 @@ sudo -u "${APP_USER}" env DISPLAY="${DISPLAY:-:0}" \
     --user-data-dir="${USER_DATA_DIR}" \
     --no-sandbox \
     --disable-dev-shm-usage \
+    --disable-features=DnsOverHttps \
+    --disable-quic \
     --window-name="Browser (${APPS_NS} - ${NS_IP})" \
     >> "${CHROM_LOG}" 2>&1 &
 
