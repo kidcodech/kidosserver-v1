@@ -123,8 +123,13 @@ func main() {
 	router.HandleFunc("/", serveIndexPage).Methods("GET")
 
 	// Admin interface - serve static files from frontend/dist
-	adminRouter := router.PathPrefix("/admin").Subrouter()
-	adminRouter.PathPrefix("/").Handler(http.StripPrefix("/admin", http.FileServer(http.Dir("./frontend/dist"))))
+	// Redirect /admin to /admin/ to ensure relative paths work correctly
+	router.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/", http.StatusFound)
+	})
+
+	// Serve static files on /admin/
+	router.PathPrefix("/admin/").Handler(http.StripPrefix("/admin/", http.FileServer(http.Dir("./frontend/dist"))))
 
 	// Wrap router with CORS and captive portal middleware
 	handler := corsMiddleware(captivePortalMiddleware(router))
