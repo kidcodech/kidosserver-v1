@@ -88,6 +88,9 @@ func main() {
 	router.HandleFunc("/api/dns/block", blockDomain).Methods("POST")
 	router.HandleFunc("/api/dns/unblock", unblockDomain).Methods("POST")
 	router.HandleFunc("/api/dns/blocked", getBlockedDomains).Methods("GET")
+	router.HandleFunc("/api/dns/blocked-logs", getBlockedDomainLogs).Methods("GET")
+	router.HandleFunc("/api/dns/blocked-logs", clearBlockedDomainLogs).Methods("DELETE")
+	router.HandleFunc("/api/dns/log-block", logBlockedDomain).Methods("POST")
 	router.HandleFunc("/api/client/info", getClientInfo).Methods("GET")
 	router.HandleFunc("/api/system/health", getSystemHealth).Methods("GET")
 
@@ -325,6 +328,71 @@ func unblockDomain(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "unblocked", "domain": req.Domain})
+}
+
+// logBlockedDomain logs a blocked domain attempt (called by DNS inspector)
+func logBlockedDomain(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Domain     string `json:"domain"`
+		UserID     int    `json:"user_id"`
+		UserName   string `json:"user_name"`
+		DeviceMAC  string `json:"device_mac"`
+		DeviceName string `json:"device_name"`
+		IPAddress  string `json:"ip_address"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Domain == "" || req.UserID == 0 || req.DeviceMAC == "" {
+		http.Error(w, "domain, user_id, and device_mac are required", http.StatusBadRequest)
+		return
+	}
+
+	err := db.LogBlockedDomain(req.Domain, req.UserID, req.UserName, req.DeviceMAC, req.DeviceName, req.IPAddress)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to log blocked domain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "logged"})
+}
+
+// getBlockedDomainLogs retrieves blocked domain logs with filters
+func getBlockedDomainLogs(w http.ResponseWriter, r *http.Request) {
+	date := r.URL.Query().Get("date")
+	userID := 0
+	deviceMAC := r.URL.Query().Get("device_mac")
+
+	if userIDStr := r.URL.Query().Get("user_id"); userIDStr != "" {
+		if id, err := strconv.Atoi(userIDStr); err == nil {
+			userID = id
+		}
+	}
+
+	logs, err := db.GetBlockedDomainLogs(date, userID, deviceMAC)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch blocked logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
+}
+
+// clearBlockedDomainLogs deletes all blocked domain logs
+func clearBlockedDomainLogs(w http.ResponseWriter, r *http.Request) {
+	err := db.ClearBlockedDomainLogs()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to clear logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
 }
 
 // getBlockedDomains returns list of blocked domains

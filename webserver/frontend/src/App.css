@@ -262,6 +262,29 @@ body {
   flex: 1;
 }
 
+.log-filters {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.filter-input {
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  color: #fff;
+  outline: none;
+  transition: border-color 0.2s;
+  min-width: 150px;
+}
+
+.filter-input:focus {
+  border-color: #646cff;
+}
+
 .domain-input {
   flex: 1;
   padding: 0.75rem 1rem;

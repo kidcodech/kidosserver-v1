@@ -83,11 +83,26 @@ func runMigrations() error {
 		attempt_count INTEGER DEFAULT 1
 	);
 
+	CREATE TABLE IF NOT EXISTS blocked_domain_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		domain TEXT NOT NULL,
+		user_id INTEGER NOT NULL,
+		user_name TEXT NOT NULL,
+		device_mac TEXT NOT NULL,
+		device_name TEXT,
+		ip_address TEXT,
+		blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_devices_mac ON user_devices(mac_address);
 	CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_user_id ON user_blocked_domains(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_lookup ON user_blocked_domains(user_id, domain);
 	CREATE INDEX IF NOT EXISTS idx_unregistered_devices_mac ON unregistered_devices(mac_address);
+	CREATE INDEX IF NOT EXISTS idx_blocked_logs_date ON blocked_domain_logs(blocked_at);
+	CREATE INDEX IF NOT EXISTS idx_blocked_logs_user ON blocked_domain_logs(user_id);
+	CREATE INDEX IF NOT EXISTS idx_blocked_logs_device ON blocked_domain_logs(device_mac);
 	`
 
 	_, err := DB.Exec(schema)

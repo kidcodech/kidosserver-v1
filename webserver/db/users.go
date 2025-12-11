@@ -385,3 +385,76 @@ func ClearUnregisteredDevice(macAddress string) error {
 	_, err := DB.Exec("DELETE FROM unregistered_devices WHERE mac_address = ?", macAddress)
 	return err
 }
+
+// BlockedDomainLog represents a blocked domain attempt
+type BlockedDomainLog struct {
+	ID         int       `json:"id"`
+	Domain     string    `json:"domain"`
+	UserID     int       `json:"user_id"`
+	UserName   string    `json:"user_name"`
+	DeviceMAC  string    `json:"device_mac"`
+	DeviceName string    `json:"device_name,omitempty"`
+	IPAddress  string    `json:"ip_address,omitempty"`
+	BlockedAt  time.Time `json:"blocked_at"`
+}
+
+// LogBlockedDomain logs a blocked domain attempt
+func LogBlockedDomain(domain string, userID int, userName, deviceMAC, deviceName, ipAddress string) error {
+	_, err := DB.Exec(`
+		INSERT INTO blocked_domain_logs (domain, user_id, user_name, device_mac, device_name, ip_address)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, domain, userID, userName, deviceMAC, deviceName, ipAddress)
+	return err
+}
+
+// GetBlockedDomainLogs retrieves blocked domain logs with optional filters
+func GetBlockedDomainLogs(date string, userID int, deviceMAC string) ([]BlockedDomainLog, error) {
+	query := `
+		SELECT id, domain, user_id, user_name, device_mac, 
+		       COALESCE(device_name, ''), COALESCE(ip_address, ''), blocked_at
+		FROM blocked_domain_logs
+		WHERE 1=1
+	`
+	args := []interface{}{}
+
+	if date != "" {
+		// Use localtime to match the user's perspective (since UI converts UTC to local)
+		query += " AND DATE(blocked_at, 'localtime') = ?"
+		args = append(args, date)
+	}
+
+	if userID > 0 {
+		query += " AND user_id = ?"
+		args = append(args, userID)
+	}
+
+	if deviceMAC != "" {
+		query += " AND device_mac = ?"
+		args = append(args, deviceMAC)
+	}
+
+	query += " ORDER BY blocked_at DESC LIMIT 1000"
+
+	rows, err := DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []BlockedDomainLog
+	for rows.Next() {
+		var log BlockedDomainLog
+		if err := rows.Scan(&log.ID, &log.Domain, &log.UserID, &log.UserName,
+			&log.DeviceMAC, &log.DeviceName, &log.IPAddress, &log.BlockedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+	return logs, nil
+}
+
+// ClearBlockedDomainLogs deletes all blocked domain logs
+func ClearBlockedDomainLogs() error {
+	_, err := DB.Exec("DELETE FROM blocked_domain_logs")
+	return err
+}

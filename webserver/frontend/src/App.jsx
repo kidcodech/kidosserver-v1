@@ -150,6 +150,16 @@ function App() {
   const [dnsRequests, setDnsRequests] = useState([])
   const [blockedDomains, setBlockedDomains] = useState([])
   const [newDomain, setNewDomain] = useState('')
+  const [blockedLogs, setBlockedLogs] = useState([])
+  // Default to today's date in local time
+  const [logFilterDate, setLogFilterDate] = useState(() => {
+    const now = new Date()
+    const offset = now.getTimezoneOffset()
+    const localDate = new Date(now.getTime() - (offset * 60 * 1000))
+    return localDate.toISOString().split('T')[0]
+  })
+  const [logFilterType, setLogFilterType] = useState('') // 'user' or 'device'
+  const [logFilterValue, setLogFilterValue] = useState('') // user_id or device_mac
   const [activeTab, setActiveTab] = useState('packets')
   const [ws, setWs] = useState(null)
   const [trafficHistory, setTrafficHistory] = useState([])
@@ -221,6 +231,13 @@ function App() {
     }
   }, [])
 
+  // Fetch logs when tab or filters change
+  useEffect(() => {
+    if (activeTab === 'blocked') {
+      fetchBlockedLogs()
+    }
+  }, [activeTab, logFilterDate, logFilterType, logFilterValue])
+
   // Update traffic graph when packets change
   useEffect(() => {
     if (packets.length === 0) return
@@ -286,6 +303,40 @@ function App() {
     // } catch (error) {
     //   console.error('Error fetching blocked domains:', error)
     // }
+  }
+
+  const fetchBlockedLogs = async () => {
+    try {
+      let url = '/api/dns/blocked-logs?'
+      // If date is cleared, default to today
+      const dateParam = logFilterDate || new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+      url += `date=${dateParam}&`
+      
+      if (logFilterType === 'user' && logFilterValue) url += `user_id=${logFilterValue}&`
+      if (logFilterType === 'device' && logFilterValue) url += `device_mac=${logFilterValue}&`
+      
+      const response = await fetch(url)
+      const data = await response.json()
+      setBlockedLogs(data || [])
+    } catch (error) {
+      console.error('Error fetching blocked logs:', error)
+    }
+  }
+
+  const clearBlockedLogs = async () => {
+    if (!confirm('Are you sure you want to clear all blocked domain logs?')) {
+      return
+    }
+    try {
+      const response = await fetch('/api/dns/blocked-logs', {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        setBlockedLogs([])
+      }
+    } catch (error) {
+      console.error('Error clearing blocked logs:', error)
+    }
   }
 
   const fetchClientInfo = async () => {
@@ -614,8 +665,8 @@ function App() {
             className={`nav-item ${activeTab === 'blocked' ? 'active' : ''}`}
             onClick={() => setActiveTab('blocked')}
           >
-            <span className="nav-icon">🚫</span>
-            <span className="nav-text">Blocked Domains</span>
+            <span className="nav-icon">📋</span>
+            <span className="nav-text">Blocked Domain Logs</span>
           </button>
           <button 
             className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
@@ -826,56 +877,103 @@ function App() {
       {activeTab === 'blocked' && (
         <>
           <div className="controls">
-            <div className="add-domain-form">
+            <div className="log-filters">
               <input 
-                type="text" 
-                value={newDomain}
-                onChange={(e) => setNewDomain(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && addDomain()}
-                placeholder="Enter domain to block (e.g., example.com)"
-                className="domain-input"
+                type="date" 
+                value={logFilterDate}
+                onChange={(e) => setLogFilterDate(e.target.value)}
+                className="filter-input"
+                placeholder="Filter by date"
               />
-              <button onClick={addDomain} className="btn btn-success">
-                ➕ Add Domain
+              <select 
+                value={logFilterType}
+                onChange={(e) => {
+                  setLogFilterType(e.target.value)
+                  setLogFilterValue('')
+                }}
+                className="filter-input"
+              >
+                <option value="">All Entries</option>
+                <option value="user">Filter by User</option>
+                <option value="device">Filter by Device</option>
+              </select>
+              {logFilterType === 'user' && (
+                <select 
+                  value={logFilterValue}
+                  onChange={(e) => setLogFilterValue(e.target.value)}
+                  className="filter-input"
+                >
+                  <option value="">Select User</option>
+                  {users.map(user => (
+                    <option key={user.id} value={user.id}>
+                      {user.display_name} ({user.username})
+                    </option>
+                  ))}
+                </select>
+              )}
+              {logFilterType === 'device' && (
+                <select 
+                  value={logFilterValue}
+                  onChange={(e) => setLogFilterValue(e.target.value)}
+                  className="filter-input"
+                >
+                  <option value="">Select Device</option>
+                  {users.flatMap(user => 
+                    (user.devices || []).map(device => ({
+                      mac: device.mac_address,
+                      name: `${device.device_name || 'Unnamed'} (${user.display_name})`
+                    }))
+                  ).map((device, idx) => (
+                    <option key={idx} value={device.mac}>
+                      {device.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div style={{display: 'flex', gap: '10px'}}>
+              <button onClick={fetchBlockedLogs} className="btn btn-primary">
+                🔍 Search
+              </button>
+              <button onClick={clearBlockedLogs} className="btn btn-danger">
+                🗑️ Clear All Logs
               </button>
             </div>
-            <button onClick={fetchBlockedDomains} className="btn btn-primary">
-              🔄 Refresh
-            </button>
           </div>
 
           <div className="stats-summary">
             <div className="stat-card">
-              <h3>Total Blocked Domains</h3>
-              <p className="stat-value">{blockedDomains.length}</p>
+              <h3>Total Log Entries</h3>
+              <p className="stat-value">{blockedLogs.length}</p>
             </div>
           </div>
 
           <div className="packet-table-container">
-            <table className="packet-table blocked-table">
+            <table className="packet-table">
               <thead>
                 <tr>
-                  <th style={{width: '80%'}}>Domain</th>
-                  <th style={{width: '20%'}}>Action</th>
+                  <th>Timestamp</th>
+                  <th>Domain</th>
+                  <th>User</th>
+                  <th>Device</th>
+                  <th>MAC Address</th>
+                  <th>IP Address</th>
                 </tr>
               </thead>
               <tbody>
-                {blockedDomains.length === 0 ? (
+                {blockedLogs.length === 0 ? (
                   <tr>
-                    <td colSpan="2" className="no-data">No domains blocked yet</td>
+                    <td colSpan="6" className="no-data">No blocked domain logs found</td>
                   </tr>
                 ) : (
-                  blockedDomains.map((domain, idx) => (
-                    <tr key={idx}>
-                      <td className="domain-name">{domain}</td>
-                      <td>
-                        <button 
-                          onClick={() => unblockDomain(domain)} 
-                          className="btn btn-small btn-primary"
-                        >
-                          ✅ Unblock
-                        </button>
-                      </td>
+                  blockedLogs.map((log) => (
+                    <tr key={log.id}>
+                      <td>{new Date(log.blocked_at).toLocaleString()}</td>
+                      <td className="domain-name">{log.domain}</td>
+                      <td>{log.user_name || 'Unknown'}</td>
+                      <td>{log.device_name || 'Unnamed'}</td>
+                      <td>{log.device_mac}</td>
+                      <td>{log.ip_address || 'N/A'}</td>
                     </tr>
                   ))
                 )}
