@@ -91,6 +91,7 @@ func runMigrations() error {
 		device_mac TEXT NOT NULL,
 		device_name TEXT,
 		ip_address TEXT,
+		query_type TEXT DEFAULT 'A',
 		blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	);
@@ -110,6 +111,10 @@ func runMigrations() error {
 		log.Printf("Migration error: %v", err)
 		return err
 	}
+
+	// Migration: Add query_type column to blocked_domain_logs if it doesn't exist
+	// We ignore the error because SQLite doesn't support "IF NOT EXISTS" for ADD COLUMN
+	DB.Exec("ALTER TABLE blocked_domain_logs ADD COLUMN query_type TEXT DEFAULT 'A'")
 
 	log.Println("✓ Database schema ready")
 	return nil

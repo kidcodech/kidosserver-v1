@@ -204,7 +204,7 @@ func isBlockedForMAC(srcMAC, domain string) bool {
 }
 
 // logBlockedDomainAttempt logs a blocked domain to the database
-func logBlockedDomainAttempt(domain, srcMAC, srcIP string) {
+func logBlockedDomainAttempt(domain, srcMAC, srcIP, queryType string) {
 	blockingMutex.RLock()
 	userID, exists := userMACMap[srcMAC]
 	blockingMutex.RUnlock()
@@ -239,11 +239,11 @@ func logBlockedDomainAttempt(domain, srcMAC, srcIP string) {
 		}
 
 		// Log directly to database
-		err = db.LogBlockedDomain(domain, userID, user.DisplayName, srcMAC, deviceName, srcIP)
+		err = db.LogBlockedDomain(domain, userID, user.DisplayName, srcMAC, deviceName, srcIP, queryType)
 		if err != nil {
 			log.Printf("Failed to log blocked domain to DB: %v", err)
 		} else {
-			log.Printf("Successfully logged blocked domain to DB: %s", domain)
+			log.Printf("Successfully logged blocked domain to DB: %s (%s)", domain, queryType)
 		}
 	}()
 }
@@ -475,7 +475,7 @@ func processPackets(xsk *xdp.Socket, reinjectFd int, reinjectAddr *syscall.Socka
 			actualPacket := frameData[:actualLen]
 
 			// Parse DNS packet and check if blocked or kidos
-			shouldIntercept, domain, srcMAC, srcIP := checkAndParseDNS(actualPacket)
+			shouldIntercept, domain, srcMAC, srcIP, queryType := checkAndParseDNS(actualPacket)
 
 			if shouldIntercept {
 				// Check if it's kidos domain or blocked domain
@@ -498,7 +498,7 @@ func processPackets(xsk *xdp.Socket, reinjectFd int, reinjectAddr *syscall.Socka
 					log.Printf("BLOCKED: DNS query for %s - redirecting to captive portal %s", domain, captivePortalIP)
 
 					// Log the blocked domain attempt
-					logBlockedDomainAttempt(domain, srcMAC, srcIP)
+					logBlockedDomainAttempt(domain, srcMAC, srcIP, queryType)
 
 					response := craftDNSResponse(actualPacket, captivePortalIP)
 					if response != nil {
@@ -586,13 +586,13 @@ func parseDNSPacket(data []byte) {
 
 // checkAndParseDNS checks if a DNS query is for a blocked domain or kidos domain
 // Returns (isBlocked/isKidos, domainName, srcMAC, srcIP)
-func checkAndParseDNS(data []byte) (bool, string, string, string) {
+func checkAndParseDNS(data []byte) (bool, string, string, string, string) {
 	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 	// Extract Ethernet layer to get source MAC
 	ethLayer := packet.Layer(layers.LayerTypeEthernet)
 	if ethLayer == nil {
-		return false, "", "", ""
+		return false, "", "", "", ""
 	}
 	eth, _ := ethLayer.(*layers.Ethernet)
 	srcMAC := eth.SrcMAC.String()
@@ -608,19 +608,20 @@ func checkAndParseDNS(data []byte) (bool, string, string, string) {
 	// Extract DNS layer
 	dnsLayer := packet.Layer(layers.LayerTypeDNS)
 	if dnsLayer == nil {
-		return false, "", "", ""
+		return false, "", "", "", ""
 	}
 	dns, _ := dnsLayer.(*layers.DNS)
 
 	// Only check queries (not responses)
 	if dns.QR || len(dns.Questions) == 0 {
-		return false, "", "", ""
+		return false, "", "", "", ""
 	}
 
 	domain := string(dns.Questions[0].Name)
+	queryType := dns.Questions[0].Type.String()
 
 	//add domain logging
-	log.Printf("Checked DNS query for domain: %s", domain)
+	log.Printf("Checked DNS query for domain: %s (Type: %s)", domain, queryType)
 
 	// Normalize domain: lowercase and remove trailing dot
 	normalizedDomain := strings.TrimSuffix(strings.ToLower(domain), ".")
@@ -629,7 +630,7 @@ func checkAndParseDNS(data []byte) (bool, string, string, string) {
 	// Check for kidos domain (exact match)
 	if normalizedDomain == "kidos" {
 		log.Printf("KIDOS domain detected: %s - resolving to %s", domain, kidosIP)
-		return true, domain, srcMAC, srcIP
+		return true, domain, srcMAC, srcIP, queryType
 	}
 
 	// Check if domain is blocked for this source MAC
@@ -639,13 +640,13 @@ func checkAndParseDNS(data []byte) (bool, string, string, string) {
 	// Get user ID from source MAC
 	userID, exists := userMACMap[srcMAC]
 	if !exists {
-		return false, domain, srcMAC, srcIP // Unknown MAC, not blocked
+		return false, domain, srcMAC, srcIP, queryType // Unknown MAC, not blocked
 	}
 
 	// Get blocked domains for this user
 	userDomains, ok := userBlockedDomains[userID]
 	if !ok {
-		return false, domain, srcMAC, srcIP // No blocked domains for this user
+		return false, domain, srcMAC, srcIP, queryType // No blocked domains for this user
 	}
 
 	// Check exact match and parent domains using normalized domain
@@ -655,7 +656,7 @@ func checkAndParseDNS(data []byte) (bool, string, string, string) {
 		log.Printf("Checking domain for user %d: %s", userID, checkDomain)
 		if userDomains[checkDomain] {
 			log.Printf("Blocked domain detected for user %d: %s", userID, checkDomain)
-			return true, domain, srcMAC, srcIP
+			return true, domain, srcMAC, srcIP, queryType
 		}
 
 		// Also check www. variant
@@ -670,11 +671,11 @@ func checkAndParseDNS(data []byte) (bool, string, string, string) {
 		log.Printf("Checking www variant for user %d: %s", userID, wwwVariant)
 		if userDomains[wwwVariant] {
 			log.Printf("Blocked domain detected (www variant) for user %d: %s", userID, wwwVariant)
-			return true, domain, srcMAC, srcIP
+			return true, domain, srcMAC, srcIP, queryType
 		}
 	}
 
-	return false, domain, srcMAC, srcIP
+	return false, domain, srcMAC, srcIP, queryType
 }
 
 // splitDomain splits a domain into parts (e.g., "www.example.com" -> ["www", "example", "com"])

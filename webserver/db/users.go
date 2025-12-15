@@ -407,15 +407,16 @@ type BlockedDomainLog struct {
 	DeviceMAC  string    `json:"device_mac"`
 	DeviceName string    `json:"device_name,omitempty"`
 	IPAddress  string    `json:"ip_address,omitempty"`
+	QueryType  string    `json:"query_type"`
 	BlockedAt  time.Time `json:"blocked_at"`
 }
 
 // LogBlockedDomain logs a blocked domain attempt
-func LogBlockedDomain(domain string, userID int, userName, deviceMAC, deviceName, ipAddress string) error {
+func LogBlockedDomain(domain string, userID int, userName, deviceMAC, deviceName, ipAddress, queryType string) error {
 	_, err := DB.Exec(`
-		INSERT INTO blocked_domain_logs (domain, user_id, user_name, device_mac, device_name, ip_address)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, domain, userID, userName, deviceMAC, deviceName, ipAddress)
+		INSERT INTO blocked_domain_logs (domain, user_id, user_name, device_mac, device_name, ip_address, query_type)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, domain, userID, userName, deviceMAC, deviceName, ipAddress, queryType)
 	return err
 }
 
@@ -423,7 +424,7 @@ func LogBlockedDomain(domain string, userID int, userName, deviceMAC, deviceName
 func GetBlockedDomainLogs(date string, userID int, deviceMAC string) ([]BlockedDomainLog, error) {
 	query := `
 		SELECT id, domain, user_id, user_name, device_mac, 
-		       COALESCE(device_name, ''), COALESCE(ip_address, ''), blocked_at
+		       COALESCE(device_name, ''), COALESCE(ip_address, ''), COALESCE(query_type, 'A'), blocked_at
 		FROM blocked_domain_logs
 		WHERE 1=1
 	`
@@ -457,7 +458,7 @@ func GetBlockedDomainLogs(date string, userID int, deviceMAC string) ([]BlockedD
 	for rows.Next() {
 		var log BlockedDomainLog
 		if err := rows.Scan(&log.ID, &log.Domain, &log.UserID, &log.UserName,
-			&log.DeviceMAC, &log.DeviceName, &log.IPAddress, &log.BlockedAt); err != nil {
+			&log.DeviceMAC, &log.DeviceName, &log.IPAddress, &log.QueryType, &log.BlockedAt); err != nil {
 			return nil, err
 		}
 		logs = append(logs, log)

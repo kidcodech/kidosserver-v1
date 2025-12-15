@@ -350,6 +350,7 @@ func logBlockedDomain(w http.ResponseWriter, r *http.Request) {
 		DeviceMAC  string `json:"device_mac"`
 		DeviceName string `json:"device_name"`
 		IPAddress  string `json:"ip_address"`
+		QueryType  string `json:"query_type"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -362,7 +363,11 @@ func logBlockedDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := db.LogBlockedDomain(req.Domain, req.UserID, req.UserName, req.DeviceMAC, req.DeviceName, req.IPAddress)
+	if req.QueryType == "" {
+		req.QueryType = "A"
+	}
+
+	err := db.LogBlockedDomain(req.Domain, req.UserID, req.UserName, req.DeviceMAC, req.DeviceName, req.IPAddress, req.QueryType)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to log blocked domain: %v", err), http.StatusInternalServerError)
 		return

@@ -1012,6 +1012,7 @@ function App() {
                 <tr>
                   <th>Timestamp</th>
                   <th>Domain</th>
+                  <th>Type</th>
                   <th>User</th>
                   <th>Device</th>
                   <th>MAC Address</th>
@@ -1021,13 +1022,14 @@ function App() {
               <tbody>
                 {blockedLogs.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="no-data">No blocked domain logs found</td>
+                    <td colSpan="7" className="no-data">No blocked domain logs found</td>
                   </tr>
                 ) : (
                   blockedLogs.map((log) => (
                     <tr key={log.id}>
                       <td>{new Date(log.blocked_at).toLocaleString()}</td>
                       <td className="domain-name">{log.domain}</td>
+                      <td><span className="protocol-badge">{log.query_type || 'A'}</span></td>
                       <td>{log.user_name || 'Unknown'}</td>
                       <td>{log.device_name || 'Unnamed'}</td>
                       <td>{log.device_mac}</td>
