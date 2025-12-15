@@ -392,6 +392,12 @@ func ClearUnregisteredDevice(macAddress string) error {
 	return err
 }
 
+// DeleteAllUnregisteredDevices removes all devices from unregistered list
+func DeleteAllUnregisteredDevices() error {
+	_, err := DB.Exec("DELETE FROM unregistered_devices")
+	return err
+}
+
 // BlockedDomainLog represents a blocked domain attempt
 type BlockedDomainLog struct {
 	ID         int       `json:"id"`

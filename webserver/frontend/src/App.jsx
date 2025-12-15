@@ -653,6 +653,32 @@ function App() {
     return date.toLocaleString()
   }
 
+  const forgetUnregisteredDevice = async (mac) => {
+    if (!confirm(`Are you sure you want to forget device ${mac}?`)) return
+
+    try {
+      await fetch(`/api/devices/unregistered/${mac}`, {
+        method: 'DELETE'
+      })
+      fetchUnregisteredDevices()
+    } catch (error) {
+      console.error('Error forgetting device:', error)
+    }
+  }
+
+  const forgetAllUnregisteredDevices = async () => {
+    if (!confirm('Are you sure you want to forget ALL unregistered devices?')) return
+
+    try {
+      await fetch('/api/devices/unregistered', {
+        method: 'DELETE'
+      })
+      fetchUnregisteredDevices()
+    } catch (error) {
+      console.error('Error forgetting all devices:', error)
+    }
+  }
+
   return (
     <div className="App">
       <aside className="sidebar">
@@ -1032,9 +1058,16 @@ function App() {
                 📱 Unregistered Devices
               </button>
             </div>
-            <button onClick={usersSubTab === 'manage' ? fetchUsers : fetchUnregisteredDevices} className="btn btn-primary">
-              🔄 Refresh
-            </button>
+            <div style={{display: 'flex', gap: '0.5rem'}}>
+              {usersSubTab === 'devices' && unregisteredDevices.length > 0 && (
+                <button onClick={forgetAllUnregisteredDevices} className="btn btn-danger">
+                  🗑️ Forget All
+                </button>
+              )}
+              <button onClick={usersSubTab === 'manage' ? fetchUsers : fetchUnregisteredDevices} className="btn btn-primary">
+                🔄 Refresh
+              </button>
+            </div>
           </div>
 
           {usersSubTab === 'manage' && (
@@ -1260,22 +1293,31 @@ function App() {
                           <td>{new Date(device.last_seen).toLocaleString()}</td>
                           <td>{device.attempt_count}</td>
                           <td>
-                            <select 
-                              onChange={(e) => {
-                                if (e.target.value) {
-                                  registerDeviceToUser(device.mac_address, parseInt(e.target.value))
-                                  e.target.value = ''
-                                }
-                              }}
-                              className="user-select"
-                            >
-                              <option value="">Assign to user...</option>
-                              {users.map(user => (
-                                <option key={user.id} value={user.id}>
-                                  {user.display_name || user.username}
-                                </option>
-                              ))}
-                            </select>
+                            <div style={{display: 'flex', gap: '0.5rem'}}>
+                              <select 
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    registerDeviceToUser(device.mac_address, parseInt(e.target.value))
+                                    e.target.value = ''
+                                  }
+                                }}
+                                className="user-select"
+                                style={{flex: 1}}
+                              >
+                                <option value="">Assign to user...</option>
+                                {users.map(user => (
+                                  <option key={user.id} value={user.id}>{user.display_name}</option>
+                                ))}
+                              </select>
+                              <button 
+                                onClick={() => forgetUnregisteredDevice(device.mac_address)}
+                                className="btn btn-danger"
+                                style={{padding: '0.25rem 0.5rem', fontSize: '0.8rem'}}
+                                title="Forget Device"
+                              >
+                                Forget
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))

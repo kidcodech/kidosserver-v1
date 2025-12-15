@@ -113,6 +113,8 @@ func main() {
 
 	// Device registration endpoints
 	router.HandleFunc("/api/devices/unregistered", getUnregisteredDevices).Methods("GET")
+	router.HandleFunc("/api/devices/unregistered", deleteAllUnregisteredDevices).Methods("DELETE")
+	router.HandleFunc("/api/devices/unregistered/{mac}", deleteUnregisteredDevice).Methods("DELETE")
 	router.HandleFunc("/api/auth/register-device", registerDevice).Methods("POST")
 
 	router.HandleFunc("/ws", handleWebSocket)
@@ -1195,6 +1197,34 @@ func getUnregisteredDevices(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(devices)
+}
+
+// deleteUnregisteredDevice removes a specific unregistered device
+func deleteUnregisteredDevice(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	mac := vars["mac"]
+
+	if mac == "" {
+		http.Error(w, "MAC address is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.ClearUnregisteredDevice(mac); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete unregistered device: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteAllUnregisteredDevices removes all unregistered devices
+func deleteAllUnregisteredDevices(w http.ResponseWriter, r *http.Request) {
+	if err := db.DeleteAllUnregisteredDevices(); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete all unregistered devices: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // registerDevice handles device registration from /auth page
