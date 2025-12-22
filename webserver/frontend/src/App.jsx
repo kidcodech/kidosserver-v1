@@ -1278,22 +1278,6 @@ function App() {
                   {/* MAC Address Management */}
                   <div className="user-section">
                     <h3>📱 Registered Devices</h3>
-                    <div className="controls" style={{marginBottom: '1rem'}}>
-                      <div className="add-domain-form">
-                        <input 
-                          type="text" 
-                          value={newUserMAC}
-                          onChange={(e) => setNewUserMAC(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && addUserMACAddress()}
-                          placeholder="Enter MAC address (e.g., aa:bb:cc:dd:ee:ff)"
-                          className="domain-input"
-                          pattern="^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"
-                        />
-                        <button onClick={addUserMACAddress} className="btn btn-success">
-                          ➕ Add MAC
-                        </button>
-                      </div>
-                    </div>
 
                     <div className="ip-list">
                       {selectedUser.devices && selectedUser.devices.length > 0 ? (
