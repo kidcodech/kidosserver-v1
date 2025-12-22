@@ -537,7 +537,7 @@ func processPackets(xsk *xdp.Socket, reinjectFd int, reinjectAddr *syscall.Socka
 					blockingMutex.RLock()
 					_, userExists := userMACMap[srcMAC]
 					blockingMutex.RUnlock()
-					
+
 					if userExists {
 						logBlockedDomainAttempt(domain, srcMAC, srcIP, queryType)
 					}

@@ -103,6 +103,24 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
         
         // Allow all DNS traffic (port 53) - redirect to DNS inspector via AF_XDP
         if (udp->dest == bpf_htons(53)) {
+            // Check if source MAC is in the allowed list
+            __u32 *allowed = bpf_map_lookup_elem(&allowed_macs, &src_mac);
+            
+            // If NOT allowed, record it in dropped_macs so it appears in UI
+            if (!allowed) {
+                struct device_info *dev_info = bpf_map_lookup_elem(&dropped_macs, &src_mac);
+                if (dev_info) {
+                    dev_info->count = dev_info->count + 1;
+                    dev_info->ip = ip->saddr;
+                } else {
+                    struct device_info new_dev = {};
+                    __builtin_memcpy(new_dev.mac, src_mac.addr, 6);
+                    new_dev.ip = ip->saddr;
+                    new_dev.count = 1;
+                    bpf_map_update_elem(&dropped_macs, &src_mac, &new_dev, BPF_ANY);
+                }
+            }
+            
             __u32 index = 0;
             if (bpf_map_lookup_elem(&xsks_map, &index))
                 return bpf_redirect_map(&xsks_map, index, 0);
