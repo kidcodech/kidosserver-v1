@@ -530,11 +530,17 @@ func processPackets(xsk *xdp.Socket, reinjectFd int, reinjectAddr *syscall.Socka
 						}
 					}
 				} else {
-					// Domain is blocked - craft DNS response pointing to captive portal
-					log.Printf("BLOCKED: DNS query for %s - redirecting to captive portal %s", domain, captivePortalIP)
+					// Domain is blocked or unregistered device - craft DNS response pointing to captive portal
+					log.Printf("BLOCKED/UNREGISTERED: DNS query for %s - redirecting to captive portal %s", domain, captivePortalIP)
 
-					// Log the blocked domain attempt
-					logBlockedDomainAttempt(domain, srcMAC, srcIP, queryType)
+					// Log the blocked domain attempt only if user is known
+					blockingMutex.RLock()
+					_, userExists := userMACMap[srcMAC]
+					blockingMutex.RUnlock()
+					
+					if userExists {
+						logBlockedDomainAttempt(domain, srcMAC, srcIP, queryType)
+					}
 
 					response := craftDNSResponse(actualPacket, captivePortalIP)
 					if response != nil {
@@ -702,7 +708,8 @@ func checkAndParseDNS(data []byte) (bool, string, string, string, string) {
 	// Get user ID from source MAC
 	userID, exists := userMACMap[srcMAC]
 	if !exists {
-		return false, domain, srcMAC, srcIP, queryType // Unknown MAC, not blocked
+		log.Printf("Unregistered device detected: %s - redirecting to captive portal", srcMAC)
+		return true, domain, srcMAC, srcIP, queryType // Unknown MAC, redirect to captive portal
 	}
 
 	// Get blocked domains for this user
