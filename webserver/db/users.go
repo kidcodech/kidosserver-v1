@@ -212,6 +212,12 @@ func DeleteUserDevice(deviceID int) error {
 	return err
 }
 
+// UpdateUserDevice updates device information (e.g., device name)
+func UpdateUserDevice(deviceID int, deviceName string) error {
+	_, err := DB.Exec("UPDATE user_devices SET device_name = ? WHERE id = ?", deviceName, deviceID)
+	return err
+}
+
 // GetUserByMAC returns user information for a given MAC address
 func GetUserByMAC(macAddress string) (*UserWithDevices, error) {
 	var u UserWithDevices

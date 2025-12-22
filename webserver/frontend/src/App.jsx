@@ -180,6 +180,8 @@ function App() {
   const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '' })
   const [newPassword, setNewPassword] = useState('')
   const [systemHealth, setSystemHealth] = useState(null)
+  const [editingDeviceName, setEditingDeviceName] = useState(null)
+  const [editDeviceNameValue, setEditDeviceNameValue] = useState('')
 
   useEffect(() => {
     // Fetch initial data
@@ -710,6 +712,29 @@ function App() {
       fetchUnregisteredDevices()
     } catch (error) {
       console.error('Error forgetting all devices:', error)
+    }
+  }
+
+  const updateDeviceName = async (deviceId, newName) => {
+    if (!selectedUser) return
+    
+    try {
+      const response = await fetch(`/api/users/${selectedUser.id}/devices/${deviceId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_name: newName })
+      })
+      
+      if (response.ok) {
+        setEditingDeviceName(null)
+        setEditDeviceNameValue('')
+        fetchUsers()
+        // Update selected user
+        const updatedUser = await fetch(`/api/users/${selectedUser.id}`).then(r => r.json())
+        setSelectedUser(updatedUser)
+      }
+    } catch (error) {
+      console.error('Error updating device name:', error)
     }
   }
 
@@ -1252,7 +1277,7 @@ function App() {
 
                   {/* MAC Address Management */}
                   <div className="user-section">
-                    <h3>📍 MAC Addresses</h3>
+                    <h3>📱 Registered Devices</h3>
                     <div className="controls" style={{marginBottom: '1rem'}}>
                       <div className="add-domain-form">
                         <input 
@@ -1274,10 +1299,54 @@ function App() {
                       {selectedUser.devices && selectedUser.devices.length > 0 ? (
                         selectedUser.devices.map((device) => (
                           <div key={device.id} className="ip-item">
-                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
-                              <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b'}}>{device.mac_address}</span>
-                              {device.ip_address && (
-                                <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#888', fontSize: '0.9rem'}}>({device.ip_address})</span>
+                            <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1}}>
+                              <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                                <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b'}}>{device.mac_address}</span>
+                                {device.ip_address && (
+                                  <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#888', fontSize: '0.9rem'}}>({device.ip_address})</span>
+                                )}
+                              </div>
+                              {editingDeviceName === device.id ? (
+                                <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                                  <input 
+                                    type="text"
+                                    value={editDeviceNameValue}
+                                    onChange={(e) => setEditDeviceNameValue(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && updateDeviceName(device.id, editDeviceNameValue)}
+                                    placeholder="Device name"
+                                    className="domain-input"
+                                    style={{flex: 1, padding: '0.5rem', fontSize: '0.9rem'}}
+                                    autoFocus
+                                  />
+                                  <button 
+                                    onClick={() => updateDeviceName(device.id, editDeviceNameValue)}
+                                    className="btn btn-small btn-success"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button 
+                                    onClick={() => { setEditingDeviceName(null); setEditDeviceNameValue(''); }}
+                                    className="btn btn-small btn-danger"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                  <span style={{color: '#9ca3af', fontSize: '0.9rem'}}>
+                                    {device.device_name || 'Unnamed device'}
+                                  </span>
+                                  <button 
+                                    onClick={() => { 
+                                      setEditingDeviceName(device.id); 
+                                      setEditDeviceNameValue(device.device_name || ''); 
+                                    }}
+                                    className="btn btn-small btn-primary"
+                                    style={{padding: '0.25rem 0.5rem', fontSize: '0.75rem'}}
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                </div>
                               )}
                             </div>
                             <span className="ip-date">Added: {new Date(device.created_at).toLocaleDateString()}</span>
@@ -1285,12 +1354,12 @@ function App() {
                               onClick={() => removeUserMAC(selectedUser.id, device.id)} 
                               className="btn btn-small btn-danger"
                             >
-                              ❌ Remove
+                              🗑️
                             </button>
                           </div>
                         ))
                       ) : (
-                        <div className="no-data">No IP addresses assigned</div>
+                        <div className="no-data">No devices registered</div>
                       )}
                     </div>
                   </div>

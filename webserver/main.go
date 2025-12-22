@@ -107,6 +107,7 @@ func main() {
 	router.HandleFunc("/api/users/{id}", deleteUser).Methods("DELETE")
 	router.HandleFunc("/api/users/{id}/devices", getUserDevices).Methods("GET")
 	router.HandleFunc("/api/users/{id}/devices", addUserDevice).Methods("POST")
+	router.HandleFunc("/api/users/{id}/devices/{device_id}", updateUserDevice).Methods("PUT")
 	router.HandleFunc("/api/users/{id}/devices/{device_id}", deleteUserDevice).Methods("DELETE")
 	router.HandleFunc("/api/users/by-mac/{mac}", getUserByMACAddress).Methods("GET")
 
@@ -1125,6 +1126,32 @@ func addUserDevice(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(device)
+}
+
+// updateUserDevice updates device information (e.g., device name)
+func updateUserDevice(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	deviceID, err := strconv.Atoi(vars["device_id"])
+	if err != nil {
+		http.Error(w, "Invalid device ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		DeviceName string `json:"device_name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.UpdateUserDevice(deviceID, req.DeviceName); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update device: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // deleteUserDevice removes a device from a user
