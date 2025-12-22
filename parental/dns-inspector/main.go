@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -27,11 +28,22 @@ import (
 
 // DNSRequest represents a captured DNS query
 type DNSRequest struct {
-	Timestamp  time.Time
-	SrcIP      string
-	Domain     string
-	QueryType  string
-	QueryClass string
+	Timestamp  time.Time `json:"timestamp"`
+	SrcIP      string    `json:"src_ip"`
+	SrcMAC     string    `json:"src_mac"`
+	Domain     string    `json:"domain"`
+	QueryType  string    `json:"query_type"`
+	QueryClass string    `json:"query_class"`
+	UserID     int       `json:"user_id"`
+	UserName   string    `json:"user_name"`
+	DeviceName string    `json:"device_name"`
+}
+
+// DeviceInfo holds user and device details for a MAC address
+type DeviceInfo struct {
+	UserID     int
+	UserName   string
+	DeviceName string
 }
 
 var (
@@ -39,6 +51,7 @@ var (
 	dnsMutex           sync.RWMutex
 	userBlockedDomains map[int]map[string]bool // userID -> domain -> blocked
 	userMACMap         map[string]int          // macAddress -> userID
+	deviceInfoMap      map[string]DeviceInfo   // macAddress -> DeviceInfo
 	blockingMutex      sync.RWMutex
 	captivePortalIP    string
 	kidosIP            string // IP address for kidos domain, loaded from config
@@ -78,9 +91,16 @@ func syncBlockedDomainsFromDB() {
 		return
 	}
 
-	// Get MAC to user mapping
+	// Get MAC to user mapping with device info
 	macMap := make(map[string]int)
-	rows, err := db.DB.Query("SELECT mac_address, user_id FROM user_devices")
+	devMap := make(map[string]DeviceInfo)
+
+	query := `
+		SELECT ud.mac_address, ud.user_id, u.username, ud.device_name 
+		FROM user_devices ud 
+		JOIN users u ON ud.user_id = u.id
+	`
+	rows, err := db.DB.Query(query)
 	if err != nil {
 		log.Printf("Error loading user devices: %v", err)
 		return
@@ -90,17 +110,32 @@ func syncBlockedDomainsFromDB() {
 	for rows.Next() {
 		var mac string
 		var userID int
-		if err := rows.Scan(&mac, &userID); err != nil {
-			log.Printf("Error scanning MAC: %v", err)
+		var username string
+		var deviceName sql.NullString // Handle nullable device_name
+
+		if err := rows.Scan(&mac, &userID, &username, &deviceName); err != nil {
+			log.Printf("Error scanning device info: %v", err)
 			continue
 		}
 		macMap[mac] = userID
+
+		devName := ""
+		if deviceName.Valid {
+			devName = deviceName.String
+		}
+
+		devMap[mac] = DeviceInfo{
+			UserID:     userID,
+			UserName:   username,
+			DeviceName: devName,
+		}
 	}
 
 	// Update global maps
 	blockingMutex.Lock()
 	userBlockedDomains = blockedMap
 	userMACMap = macMap
+	deviceInfoMap = devMap
 	blockingMutex.Unlock()
 
 	totalDomains := 0
@@ -276,6 +311,7 @@ func main() {
 	// Initialize per-user blocked domains
 	userBlockedDomains = make(map[int]map[string]bool)
 	userMACMap = make(map[string]int)
+	deviceInfoMap = make(map[string]DeviceInfo)
 	loadBlockedDomains()
 	log.Println("✓ Initialized per-user blocked domains")
 
@@ -539,6 +575,14 @@ func processPackets(xsk *xdp.Socket, reinjectFd int, reinjectAddr *syscall.Socka
 func parseDNSPacket(data []byte) {
 	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
+	// Extract Ethernet layer to get source MAC
+	ethLayer := packet.Layer(layers.LayerTypeEthernet)
+	srcMAC := ""
+	if ethLayer != nil {
+		eth, _ := ethLayer.(*layers.Ethernet)
+		srcMAC = eth.SrcMAC.String()
+	}
+
 	// Extract IP layer
 	ipLayer := packet.Layer(layers.LayerTypeIPv4)
 	if ipLayer == nil {
@@ -568,20 +612,38 @@ func parseDNSPacket(data []byte) {
 	queryType := question.Type.String()
 	queryClass := question.Class.String()
 
+	// Lookup user info
+	var userID int
+	var userName, deviceName string
+
+	if srcMAC != "" {
+		blockingMutex.RLock()
+		if info, ok := deviceInfoMap[srcMAC]; ok {
+			userID = info.UserID
+			userName = info.UserName
+			deviceName = info.DeviceName
+		}
+		blockingMutex.RUnlock()
+	}
+
 	// Store DNS request
 	req := DNSRequest{
 		Timestamp:  time.Now(),
 		SrcIP:      ip.SrcIP.String(),
+		SrcMAC:     srcMAC,
 		Domain:     domain,
 		QueryType:  queryType,
 		QueryClass: queryClass,
+		UserID:     userID,
+		UserName:   userName,
+		DeviceName: deviceName,
 	}
 
 	dnsMutex.Lock()
 	dnsRequests = append(dnsRequests, req)
 	dnsMutex.Unlock()
 
-	log.Printf("DNS Query: %s -> %s [%s/%s]", ip.SrcIP, domain, queryType, queryClass)
+	log.Printf("DNS Query: %s (%s) -> %s [%s/%s] User: %s", ip.SrcIP, srcMAC, domain, queryType, queryClass, userName)
 }
 
 // checkAndParseDNS checks if a DNS query is for a blocked domain or kidos domain
@@ -918,19 +980,9 @@ func handleConnection(conn net.Conn) {
 		copy(requests, dnsRequests)
 		dnsMutex.RUnlock()
 
-		fmt.Fprintf(conn, "[")
-		for i, req := range requests {
-			if i > 0 {
-				fmt.Fprintf(conn, ",")
-			}
-			fmt.Fprintf(conn, `{"timestamp":"%s","src_ip":"%s","domain":"%s","query_type":"%s","query_class":"%s"}`,
-				req.Timestamp.Format(time.RFC3339),
-				req.SrcIP,
-				req.Domain,
-				req.QueryType,
-				req.QueryClass)
+		if err := json.NewEncoder(conn).Encode(requests); err != nil {
+			log.Printf("Failed to encode DNS requests: %v", err)
 		}
-		fmt.Fprintf(conn, "]\n")
 
 	case "BLOCK_DOMAIN":
 		// Deprecated: Use API endpoint /api/domains/block instead
@@ -951,19 +1003,9 @@ func handleConnection(conn net.Conn) {
 		copy(requests, dnsRequests)
 		dnsMutex.RUnlock()
 
-		fmt.Fprintf(conn, "[")
-		for i, req := range requests {
-			if i > 0 {
-				fmt.Fprintf(conn, ",")
-			}
-			fmt.Fprintf(conn, `{"timestamp":"%s","src_ip":"%s","domain":"%s","query_type":"%s","query_class":"%s"}`,
-				req.Timestamp.Format(time.RFC3339),
-				req.SrcIP,
-				req.Domain,
-				req.QueryType,
-				req.QueryClass)
+		if err := json.NewEncoder(conn).Encode(requests); err != nil {
+			log.Printf("Failed to encode DNS requests: %v", err)
 		}
-		fmt.Fprintf(conn, "]\n")
 	}
 }
 

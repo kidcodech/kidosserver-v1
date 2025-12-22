@@ -310,6 +310,12 @@ func RemoveBlockedDomain(domainID int) error {
 	return err
 }
 
+// RemoveBlockedDomainByName removes a blocked domain for a user by domain name
+func RemoveBlockedDomainByName(userID int, domain string) error {
+	_, err := DB.Exec("DELETE FROM user_blocked_domains WHERE user_id = ? AND domain = ?", userID, domain)
+	return err
+}
+
 // IsBlockedForUser checks if a domain is blocked for a specific user
 func IsBlockedForUser(userID int, domain string) (bool, error) {
 	var count int

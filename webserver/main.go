@@ -42,9 +42,13 @@ type PacketAggregate struct {
 type DNSRequest struct {
 	Timestamp  string `json:"timestamp"`
 	SrcIP      string `json:"src_ip"`
+	SrcMAC     string `json:"src_mac"`
 	Domain     string `json:"domain"`
 	QueryType  string `json:"query_type"`
 	QueryClass string `json:"query_class"`
+	UserID     int    `json:"user_id"`
+	UserName   string `json:"user_name"`
+	DeviceName string `json:"device_name"`
 }
 
 // WebSocketMessage represents a message sent over WebSocket
@@ -109,6 +113,7 @@ func main() {
 	// Per-user domain blocking endpoints
 	router.HandleFunc("/api/users/{id}/blocked-domains", getUserBlockedDomains).Methods("GET")
 	router.HandleFunc("/api/users/{id}/blocked-domains", blockDomainForUser).Methods("POST")
+	router.HandleFunc("/api/users/{id}/blocked-domains/unblock", unblockDomainForUserByName).Methods("POST")
 	router.HandleFunc("/api/users/{id}/blocked-domains/{domain_id}", unblockDomainForUser).Methods("DELETE")
 
 	// Device registration endpoints
@@ -277,9 +282,48 @@ func getDNSRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("SUCCESS: Returning %d DNS requests", len(requests))
+	// Filter requests
+	dateStr := r.URL.Query().Get("date")
+	userIDStr := r.URL.Query().Get("user_id")
+	deviceMAC := r.URL.Query().Get("device_mac")
+
+	var filtered []DNSRequest
+	for _, req := range requests {
+		// Filter by date
+		if dateStr != "" {
+			// Parse timestamp from request (RFC3339)
+			t, err := time.Parse(time.RFC3339, req.Timestamp)
+			if err == nil {
+				reqDate := t.Format("2006-01-02")
+				if reqDate != dateStr {
+					continue
+				}
+			}
+		}
+
+		// Filter by user
+		if userIDStr != "" {
+			uid, err := strconv.Atoi(userIDStr)
+			if err != nil {
+				log.Printf("Invalid user_id filter: %s", userIDStr)
+				continue
+			}
+			if req.UserID != uid {
+				continue
+			}
+		}
+
+		// Filter by device
+		if deviceMAC != "" && req.SrcMAC != deviceMAC {
+			continue
+		}
+
+		filtered = append(filtered, req)
+	}
+
+	log.Printf("SUCCESS: Returning %d DNS requests (filtered from %d)", len(filtered), len(requests))
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(requests)
+	json.NewEncoder(w).Encode(filtered)
 }
 
 // clearDNSRequests clears all stored DNS requests
@@ -1174,7 +1218,7 @@ func blockDomainForUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(domain)
 }
 
-// unblockDomainForUser removes a blocked domain for a user
+// unblockDomainForUser unblocks a domain for a specific user
 func unblockDomainForUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	domainID, err := strconv.Atoi(vars["domain_id"])
@@ -1189,6 +1233,37 @@ func unblockDomainForUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("✓ Removed blocked domain ID: %d", domainID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// unblockDomainForUserByName unblocks a domain for a specific user by domain name
+func unblockDomainForUserByName(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Domain string `json:"domain"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Domain == "" {
+		http.Error(w, "Domain is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.RemoveBlockedDomainByName(userID, req.Domain); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to unblock domain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("✓ Removed blocked domain '%s' for user ID: %d", req.Domain, userID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

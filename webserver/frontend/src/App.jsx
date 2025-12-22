@@ -161,6 +161,7 @@ function App() {
   const [logFilterType, setLogFilterType] = useState('') // 'user' or 'device'
   const [logFilterValue, setLogFilterValue] = useState('') // user_id or device_mac
   const [activeTab, setActiveTab] = useState('packets')
+  const [logsSubTab, setLogsSubTab] = useState('blocked')
   const [ws, setWs] = useState(null)
   const [trafficHistory, setTrafficHistory] = useState([])
   const [lastPacketCount, setLastPacketCount] = useState(0)
@@ -191,9 +192,12 @@ function App() {
 
     // Auto-refresh every second
     const refreshInterval = setInterval(() => {
-      fetchPackets()
-      fetchDNSRequests()
-      fetchBlockedDomains()
+      if (activeTab === 'packets') {
+        fetchPackets()
+      }
+      if (activeTab === 'logs' && logsSubTab === 'dns') {
+        fetchDNSRequests()
+      }
       if (activeTab === 'users' && usersSubTab === 'devices') {
         fetchUnregisteredDevices()
       }
@@ -234,10 +238,19 @@ function App() {
 
   // Fetch logs when tab or filters change
   useEffect(() => {
-    if (activeTab === 'blocked') {
-      fetchBlockedLogs()
+    if (activeTab === 'logs') {
+      // Ensure users are loaded for filtering
+      if (users.length === 0) {
+        fetchUsers()
+      }
+      
+      if (logsSubTab === 'blocked') {
+        fetchBlockedLogs()
+      } else if (logsSubTab === 'dns') {
+        fetchDNSRequests()
+      }
     }
-  }, [activeTab, logFilterDate, logFilterType, logFilterValue])
+  }, [activeTab, logsSubTab, logFilterDate, logFilterType, logFilterValue])
 
   // Update traffic graph when packets change
   useEffect(() => {
@@ -287,7 +300,15 @@ function App() {
 
   const fetchDNSRequests = async () => {
     try {
-      const response = await fetch('/api/dns/requests')
+      let url = '/api/dns/requests?'
+      // If date is cleared, default to today
+      const dateParam = logFilterDate || new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+      url += `date=${dateParam}&`
+      
+      if (logFilterType === 'user' && logFilterValue) url += `user_id=${logFilterValue}&`
+      if (logFilterType === 'device' && logFilterValue) url += `device_mac=${logFilterValue}&`
+
+      const response = await fetch(url)
       const data = await response.json()
       setDnsRequests(data || [])
     } catch (error) {
@@ -431,6 +452,19 @@ function App() {
         method: 'DELETE'
       })
       fetchUserBlockedDomains(userId)
+    } catch (error) {
+      console.error('Error unblocking domain for user:', error)
+    }
+  }
+
+  const unblockDomainByName = async (userId, domain) => {
+    try {
+      await fetch(`/api/users/${userId}/blocked-domains/unblock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain })
+      })
+      fetchBlockedLogs() // Refresh logs
     } catch (error) {
       console.error('Error unblocking domain for user:', error)
     }
@@ -713,18 +747,11 @@ function App() {
             <span className="nav-text">Traffic Monitor</span>
           </button>
           <button 
-            className={`nav-item ${activeTab === 'dns' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dns')}
-          >
-            <span className="nav-icon">🌐</span>
-            <span className="nav-text">DNS Requests</span>
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'blocked' ? 'active' : ''}`}
-            onClick={() => setActiveTab('blocked')}
+            className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('logs')}
           >
             <span className="nav-icon">📋</span>
-            <span className="nav-text">Blocked Domain Logs</span>
+            <span className="nav-text">Logs</span>
           </button>
           <button 
             className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
@@ -869,177 +896,258 @@ function App() {
         </>
       )}
 
-      {activeTab === 'dns' && (
+      {activeTab === 'logs' && (
         <>
           <div className="controls">
-            <button onClick={fetchDNSRequests} className="btn btn-primary">
-              🔄 Refresh
-            </button>
-            <button onClick={clearDNSRequests} className="btn btn-danger">
-              🗑️ Clear All
-            </button>
-          </div>
-
-          <div className="stats-summary">
-            <div className="stat-card">
-              <h3>Total DNS Requests</h3>
-              <p className="stat-value">{dnsRequests.length}</p>
-            </div>
-          </div>
-
-          <div className="packet-table-container">
-            <table className="packet-table dns-table">
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Source IP</th>
-                  <th>Domain</th>
-                  <th>Query Type</th>
-                  <th>Query Class</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dnsRequests.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="no-data">No DNS requests captured yet</td>
-                  </tr>
-                ) : (
-                  [...dnsRequests]
-                    .reverse()
-                    .map((req, idx) => (
-                      <tr key={idx}>
-                        <td>{formatTimestamp(req.timestamp)}</td>
-                        <td>{req.src_ip}</td>
-                        <td className="domain-name">{req.domain}</td>
-                        <td>{req.query_type}</td>
-                        <td>{req.query_class}</td>
-                        <td>
-                          <button 
-                            onClick={() => blockDomain(req.domain)} 
-                            className="btn btn-small btn-danger"
-                            disabled={blockedDomains.includes(req.domain)}
-                          >
-                            {blockedDomains.includes(req.domain) ? '🚫 Blocked' : '🚫 Block'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      {activeTab === 'blocked' && (
-        <>
-          <div className="controls">
-            <div className="log-filters">
-              <input 
-                type="date" 
-                value={logFilterDate}
-                onChange={(e) => setLogFilterDate(e.target.value)}
-                className="filter-input"
-                placeholder="Filter by date"
-              />
-              <select 
-                value={logFilterType}
-                onChange={(e) => {
-                  setLogFilterType(e.target.value)
-                  setLogFilterValue('')
-                }}
-                className="filter-input"
+            <div className="user-tabs">
+              <button 
+                className={`user-tab ${logsSubTab === 'blocked' ? 'active' : ''}`}
+                onClick={() => setLogsSubTab('blocked')}
               >
-                <option value="">All Entries</option>
-                <option value="user">Filter by User</option>
-                <option value="device">Filter by Device</option>
-              </select>
-              {logFilterType === 'user' && (
-                <select 
-                  value={logFilterValue}
-                  onChange={(e) => setLogFilterValue(e.target.value)}
-                  className="filter-input"
-                >
-                  <option value="">Select User</option>
-                  {users.map(user => (
-                    <option key={user.id} value={user.id}>
-                      {user.display_name} ({user.username})
-                    </option>
-                  ))}
-                </select>
-              )}
-              {logFilterType === 'device' && (
-                <select 
-                  value={logFilterValue}
-                  onChange={(e) => setLogFilterValue(e.target.value)}
-                  className="filter-input"
-                >
-                  <option value="">Select Device</option>
-                  {users.flatMap(user => 
-                    (user.devices || []).map(device => ({
-                      mac: device.mac_address,
-                      name: `${device.device_name || 'Unnamed'} (${user.display_name})`
-                    }))
-                  ).map((device, idx) => (
-                    <option key={idx} value={device.mac}>
-                      {device.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-            <div style={{display: 'flex', gap: '10px'}}>
-              <button onClick={fetchBlockedLogs} className="btn btn-primary">
-                🔍 Search
+                🚫 Blocked Domains
               </button>
-              <button onClick={clearBlockedLogs} className="btn btn-danger">
-                🗑️ Clear All Logs
+              <button 
+                className={`user-tab ${logsSubTab === 'dns' ? 'active' : ''}`}
+                onClick={() => setLogsSubTab('dns')}
+              >
+                🌐 DNS Requests
               </button>
             </div>
           </div>
 
-          <div className="stats-summary">
-            <div className="stat-card">
-              <h3>Total Log Entries</h3>
-              <p className="stat-value">{blockedLogs.length}</p>
-            </div>
-          </div>
+          {logsSubTab === 'dns' && (
+            <>
+              <div className="controls">
+                <div className="log-filters">
+                  <input 
+                    type="date" 
+                    value={logFilterDate}
+                    onChange={(e) => setLogFilterDate(e.target.value)}
+                    className="filter-input"
+                    placeholder="Filter by date"
+                  />
+                  <select 
+                    value={logFilterType}
+                    onChange={(e) => {
+                      setLogFilterType(e.target.value)
+                      setLogFilterValue('')
+                    }}
+                    className="filter-input"
+                  >
+                    <option value="">All Entries</option>
+                    <option value="user">Filter by User</option>
+                    <option value="device">Filter by Device</option>
+                  </select>
+                  {logFilterType === 'user' && (
+                    <select 
+                      value={logFilterValue}
+                      onChange={(e) => setLogFilterValue(e.target.value)}
+                      className="filter-input"
+                    >
+                      <option value="">Select User</option>
+                      {users.map(user => (
+                        <option key={user.id} value={user.id}>
+                          {user.display_name} ({user.username})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {logFilterType === 'device' && (
+                    <select 
+                      value={logFilterValue}
+                      onChange={(e) => setLogFilterValue(e.target.value)}
+                      className="filter-input"
+                    >
+                      <option value="">Select Device</option>
+                      {users.flatMap(user => 
+                        (user.devices || []).map(device => ({
+                          mac: device.mac_address,
+                          name: `${device.device_name || 'Unnamed'} (${user.display_name})`
+                        }))
+                      ).map((device, idx) => (
+                        <option key={idx} value={device.mac}>
+                          {device.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div style={{display: 'flex', gap: '10px'}}>
+                  <button onClick={fetchDNSRequests} className="btn btn-primary">
+                    🔄 Refresh
+                  </button>
+                  <button onClick={clearDNSRequests} className="btn btn-danger">
+                    🗑️ Clear All
+                  </button>
+                </div>
+              </div>
 
-          <div className="packet-table-container">
-            <table className="packet-table">
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Domain</th>
-                  <th>Type</th>
-                  <th>User</th>
-                  <th>Device</th>
-                  <th>MAC Address</th>
-                  <th>IP Address</th>
-                </tr>
-              </thead>
-              <tbody>
-                {blockedLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan="7" className="no-data">No blocked domain logs found</td>
-                  </tr>
-                ) : (
-                  blockedLogs.map((log) => (
-                    <tr key={log.id}>
-                      <td>{new Date(log.blocked_at).toLocaleString()}</td>
-                      <td className="domain-name">{log.domain}</td>
-                      <td><span className="protocol-badge">{log.query_type || 'A'}</span></td>
-                      <td>{log.user_name || 'Unknown'}</td>
-                      <td>{log.device_name || 'Unnamed'}</td>
-                      <td>{log.device_mac}</td>
-                      <td>{log.ip_address || 'N/A'}</td>
+              <div className="stats-summary">
+                <div className="stat-card">
+                  <h3>Total DNS Requests</h3>
+                  <p className="stat-value">{dnsRequests.length}</p>
+                </div>
+              </div>
+
+              <div className="packet-table-container">
+                <table className="packet-table dns-table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Domain</th>
+                      <th>Type</th>
+                      <th>User</th>
+                      <th>Device</th>
+                      <th>MAC Address</th>
+                      <th>IP Address</th>
+                      <th>Action</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {dnsRequests.length === 0 ? (
+                      <tr>
+                        <td colSpan="8" className="no-data">No DNS requests captured yet</td>
+                      </tr>
+                    ) : (
+                      [...dnsRequests]
+                        .reverse()
+                        .map((req, idx) => (
+                          <tr key={idx}>
+                            <td>{formatTimestamp(req.timestamp)}</td>
+                            <td className="domain-name">{req.domain}</td>
+                            <td><span className="protocol-badge">{req.query_type}</span></td>
+                            <td>{req.user_name || 'Unknown'}</td>
+                            <td>{req.device_name || 'Unnamed'}</td>
+                            <td>{req.src_mac || '-'}</td>
+                            <td>{req.src_ip}</td>
+                            <td>
+                              <button 
+                                onClick={() => blockDomain(req.domain)} 
+                                className="btn btn-small btn-danger"
+                                disabled={blockedDomains.includes(req.domain)}
+                              >
+                                {blockedDomains.includes(req.domain) ? '🚫 Blocked' : '🚫 Block'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {logsSubTab === 'blocked' && (
+            <>
+              <div className="controls">
+                <div className="log-filters">
+                  <input 
+                    type="date" 
+                    value={logFilterDate}
+                    onChange={(e) => setLogFilterDate(e.target.value)}
+                    className="filter-input"
+                    placeholder="Filter by date"
+                  />
+                  <select 
+                    value={logFilterType}
+                    onChange={(e) => {
+                      setLogFilterType(e.target.value)
+                      setLogFilterValue('')
+                    }}
+                    className="filter-input"
+                  >
+                    <option value="">All Entries</option>
+                    <option value="user">Filter by User</option>
+                    <option value="device">Filter by Device</option>
+                  </select>
+                  {logFilterType === 'user' && (
+                    <select 
+                      value={logFilterValue}
+                      onChange={(e) => setLogFilterValue(e.target.value)}
+                      className="filter-input"
+                    >
+                      <option value="">Select User</option>
+                      {users.map(user => (
+                        <option key={user.id} value={user.id}>
+                          {user.display_name} ({user.username})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {logFilterType === 'device' && (
+                    <select 
+                      value={logFilterValue}
+                      onChange={(e) => setLogFilterValue(e.target.value)}
+                      className="filter-input"
+                    >
+                      <option value="">Select Device</option>
+                      {users.flatMap(user => 
+                        (user.devices || []).map(device => ({
+                          mac: device.mac_address,
+                          name: `${device.device_name || 'Unnamed'} (${user.display_name})`
+                        }))
+                      ).map((device, idx) => (
+                        <option key={idx} value={device.mac}>
+                          {device.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div style={{display: 'flex', gap: '10px'}}>
+                  <button onClick={fetchBlockedLogs} className="btn btn-primary">
+                    🔄 Refresh
+                  </button>
+                  <button onClick={clearBlockedLogs} className="btn btn-danger">
+                    🗑️ Clear All
+                  </button>
+                </div>
+              </div>
+
+              <div className="stats-summary">
+                <div className="stat-card">
+                  <h3>Total Log Entries</h3>
+                  <p className="stat-value">{blockedLogs.length}</p>
+                </div>
+              </div>
+
+              <div className="packet-table-container">
+                <table className="packet-table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Domain</th>
+                      <th>Type</th>
+                      <th>User</th>
+                      <th>Device</th>
+                      <th>MAC Address</th>
+                      <th>IP Address</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {blockedLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="no-data">No blocked domain logs found</td>
+                      </tr>
+                    ) : (
+                      blockedLogs.map((log) => (
+                        <tr key={log.id}>
+                          <td>{new Date(log.blocked_at).toLocaleString()}</td>
+                          <td className="domain-name">{log.domain}</td>
+                          <td><span className="protocol-badge">{log.query_type || 'A'}</span></td>
+                          <td>{log.user_name || 'Unknown'}</td>
+                          <td>{log.device_name || 'Unnamed'}</td>
+                          <td>{log.device_mac}</td>
+                          <td>{log.ip_address || 'N/A'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -1217,7 +1325,7 @@ function App() {
                     </div>
 
                     <div className="packet-table-container">
-                      <table className="packet-table blocked-table">
+                      <table className="packet-table user-blocked-table">
                         <thead>
                           <tr>
                             <th style={{width: '80%'}}>Domain</th>
