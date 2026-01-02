@@ -136,6 +136,7 @@ func runMigrations() error {
 
 	// Seed Data - System Settings
 	DB.Exec("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_dot', 'true')")
+	DB.Exec("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_doq', 'true')")
 	DB.Exec("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_doh', 'true')")
 
 	// Seed Data - DoH Providers

@@ -240,6 +240,12 @@ func syncSettingsFromDatabase() error {
 		log.Printf("Failed to get block_dot setting: %v", err)
 	}
 
+	// Get block_doq setting (default true)
+	valDoQ, err := db.GetSystemSetting("block_doq")
+	if err != nil {
+		log.Printf("Failed to get block_doq setting: %v", err)
+	}
+
 	// Default is to block (value 0)
 	// If setting is "false", we allow (value 1)
 	// If setting is "true" or empty, we block (value 0)
@@ -248,9 +254,19 @@ func syncSettingsFromDatabase() error {
 		mapValDot = 1
 	}
 
+	var mapValDoQ uint32 = 0
+	if valDoQ == "false" {
+		mapValDoQ = 1
+	}
+
 	keyDot := uint32(0)
 	if err := globalSettingsMap.Put(&keyDot, &mapValDot); err != nil {
-		return fmt.Errorf("failed to update global_settings map (DoT): %w", err)
+		log.Printf("Failed to update block_dot setting: %v", err)
+	}
+
+	keyDoQ := uint32(2)
+	if err := globalSettingsMap.Put(&keyDoQ, &mapValDoQ); err != nil {
+		log.Printf("Failed to update block_doq setting: %v", err)
 	}
 
 	// Get block_doh setting (default true)

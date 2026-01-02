@@ -67,9 +67,10 @@ struct {
 // Global settings map
 // Key: 0 (block_dot), Value: 1 = Allow, 0 = Block (default)
 // Key: 1 (block_doh), Value: 1 = Allow, 0 = Block (default)
+// Key: 2 (block_doq), Value: 1 = Allow, 0 = Block (default)
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 2);
+    __uint(max_entries, 3);
     __type(key, __u32);
     __type(value, __u32);
 } global_settings SEC(".maps");
@@ -158,13 +159,25 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
         }
     }
 
-    // Check if this is UDP traffic
+    // Check if this is UDP traffic (for DoQ blocking)
     if (ip->protocol == IPPROTO_UDP) {
-        // Parse UDP header
         struct udphdr *udp = (void *)ip + (ip->ihl * 4);
         if ((void *)(udp + 1) > data_end)
-            return XDP_PASS; // Malformed packet
-        
+            return XDP_PASS;
+
+        // Check for DoQ (port 853 or 784)
+        if (udp->dest == bpf_htons(853) || udp->dest == bpf_htons(784)) {
+            __u32 key = 2; // block_doq setting
+            __u32 *allow_doq = bpf_map_lookup_elem(&global_settings, &key);
+            
+            // If map entry exists and value is 1, allow. Otherwise (0 or null), block.
+            if (allow_doq && *allow_doq == 1) {
+                // Allow DoQ
+            } else {
+                return XDP_DROP; // Block DoQ
+            }
+        }
+
         // Allow all DNS traffic (port 53) - redirect to DNS inspector via AF_XDP
         if (udp->dest == bpf_htons(53) || udp->source == bpf_htons(53)) {
             // Check if source MAC is in the allowed list

@@ -183,6 +183,7 @@ function App() {
   const [editingDeviceName, setEditingDeviceName] = useState(null)
   const [editDeviceNameValue, setEditDeviceNameValue] = useState('')
   const [blockDoT, setBlockDoT] = useState(true)
+  const [blockDoQ, setBlockDoQ] = useState(true)
   const [blockDoH, setBlockDoH] = useState(true)
   const [dohProviders, setDohProviders] = useState([])
   const [newDoHProvider, setNewDoHProvider] = useState({ name: '', ip_address: '' })
@@ -251,6 +252,12 @@ function App() {
         const data = await resDot.json()
         setBlockDoT(data.value !== 'false')
       }
+
+      const resDoQ = await fetch('/api/system/settings/block_doq')
+      if (resDoQ.ok) {
+        const data = await resDoQ.json()
+        setBlockDoQ(data.value !== 'false')
+      }
       
       const resDoH = await fetch('/api/system/settings/block_doh')
       if (resDoH.ok) {
@@ -285,6 +292,20 @@ function App() {
       setBlockDoT(newValue)
     } catch (error) {
       console.error('Error updating block_dot setting:', error)
+    }
+  }
+
+  const toggleBlockDoQ = async () => {
+    const newValue = !blockDoQ
+    try {
+      await fetch('/api/system/settings/block_doq', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: newValue ? 'true' : 'false' })
+      })
+      setBlockDoQ(newValue)
+    } catch (error) {
+      console.error('Error updating block_doq setting:', error)
     }
   }
 
@@ -1682,6 +1703,24 @@ function App() {
             <p className="setting-description">
               Block DNS over TLS traffic on port 853. This prevents devices from bypassing DNS filtering by using encrypted DNS.
               {blockDoT ? <span className="status-blocked">Currently Blocked</span> : <span className="status-allowed">Currently Allowed</span>}
+            </p>
+          </div>
+
+          <div className="setting-card">
+            <div className="setting-header">
+              <h3>DNS over QUIC (DoQ)</h3>
+              <label className="switch">
+                <input 
+                  type="checkbox" 
+                  checked={blockDoQ} 
+                  onChange={toggleBlockDoQ}
+                />
+                <span className="slider round"></span>
+              </label>
+            </div>
+            <p className="setting-description">
+              Block DNS over QUIC traffic on ports 853 and 784. This prevents devices from bypassing DNS filtering by using encrypted DNS over UDP.
+              {blockDoQ ? <span className="status-blocked">Currently Blocked</span> : <span className="status-allowed">Currently Allowed</span>}
             </p>
           </div>
 

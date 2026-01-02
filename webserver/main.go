@@ -1496,7 +1496,7 @@ func getSystemSetting(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If not found, return default for known keys
-	if value == "" && key == "block_dot" {
+	if value == "" && (key == "block_dot" || key == "block_doq") {
 		value = "true"
 	}
 
