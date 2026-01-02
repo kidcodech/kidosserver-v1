@@ -182,6 +182,7 @@ function App() {
   const [systemHealth, setSystemHealth] = useState(null)
   const [editingDeviceName, setEditingDeviceName] = useState(null)
   const [editDeviceNameValue, setEditDeviceNameValue] = useState('')
+  const [blockDoT, setBlockDoT] = useState(true)
 
   useEffect(() => {
     // Fetch initial data
@@ -191,6 +192,7 @@ function App() {
     fetchClientInfo()
     fetchUsers()
     fetchUnregisteredDevices()
+    fetchSystemSettings()
 
     // Auto-refresh every second
     const refreshInterval = setInterval(() => {
@@ -237,6 +239,34 @@ function App() {
       }
     }
   }, [])
+
+  const fetchSystemSettings = async () => {
+    try {
+      const response = await fetch('/api/system/settings/block_dot')
+      if (response.ok) {
+        const data = await response.json()
+        setBlockDoT(data.value === 'true')
+      }
+    } catch (error) {
+      console.error('Error fetching system settings:', error)
+    }
+  }
+
+  const toggleBlockDoT = async () => {
+    try {
+      const newValue = !blockDoT
+      const response = await fetch('/api/system/settings/block_dot', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: newValue.toString() })
+      })
+      if (response.ok) {
+        setBlockDoT(newValue)
+      }
+    } catch (error) {
+      console.error('Error updating system settings:', error)
+    }
+  }
 
   // Fetch logs when tab or filters change
   useEffect(() => {
@@ -791,6 +821,13 @@ function App() {
           >
             <span className="nav-icon">⚙️</span>
             <span className="nav-text">System Health</span>
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('settings'); fetchSystemSettings(); }}
+          >
+            <span className="nav-icon">🔧</span>
+            <span className="nav-text">Settings</span>
           </button>
         </nav>
       </aside>
@@ -1540,9 +1577,33 @@ function App() {
           )}
         </>
       )}
+
+      {activeTab === 'settings' && (
+        <div className="settings-section">
+          <h2>System Settings</h2>
+          
+          <div className="setting-card">
+            <div className="setting-header">
+              <h3>DNS over TLS (DoT)</h3>
+              <label className="switch">
+                <input 
+                  type="checkbox" 
+                  checked={blockDoT} 
+                  onChange={toggleBlockDoT}
+                />
+                <span className="slider round"></span>
+              </label>
+            </div>
+            <p className="setting-description">
+              Block DNS over TLS traffic on port 853. This prevents devices from bypassing DNS filtering by using encrypted DNS.
+              {blockDoT ? <span className="status-blocked">Currently Blocked</span> : <span className="status-allowed">Currently Allowed</span>}
+            </p>
+          </div>
+        </div>
+      )}
+
       </main>
 
-      {/* Create User Modal */}
       {showCreateUserModal && (
         <div className="modal-overlay" onClick={() => setShowCreateUserModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>

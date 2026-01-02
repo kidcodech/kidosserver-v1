@@ -98,6 +98,8 @@ func main() {
 	router.HandleFunc("/api/dns/log-block", logBlockedDomain).Methods("POST")
 	router.HandleFunc("/api/client/info", getClientInfo).Methods("GET")
 	router.HandleFunc("/api/system/health", getSystemHealth).Methods("GET")
+	router.HandleFunc("/api/system/settings/{key}", getSystemSetting).Methods("GET")
+	router.HandleFunc("/api/system/settings/{key}", updateSystemSetting).Methods("PUT")
 
 	// User management endpoints
 	router.HandleFunc("/api/users", getUsers).Methods("GET")
@@ -1474,4 +1476,46 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 	}
 
 	return cert, nil
+}
+
+// getSystemSetting returns a specific system setting
+func getSystemSetting(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	key := vars["key"]
+
+	value, err := db.GetSystemSetting(key)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get setting: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// If not found, return default for known keys
+	if value == "" && key == "block_dot" {
+		value = "true"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"key": key, "value": value})
+}
+
+// updateSystemSetting updates a specific system setting
+func updateSystemSetting(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	key := vars["key"]
+
+	var req struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.SetSystemSetting(key, req.Value); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update setting: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"key": key, "value": req.Value})
 }

@@ -11,6 +11,7 @@
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/tcp.h>
 #include <linux/udp.h>
 #include <linux/in.h>
 #include <bpf/bpf_helpers.h>
@@ -59,9 +60,18 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_XSKMAP);
     __uint(max_entries, 64);
-    __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof(__u32));
+    __type(key, __u32);
+    __type(value, __u32);
 } xsks_map SEC(".maps");
+
+// Global settings map
+// Key: 0 (block_dot), Value: 1 = Allow, 0 = Block (default)
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u32);
+} global_settings SEC(".maps");
 
 #define STAT_ALLOWED 0
 #define STAT_DROPPED 1
@@ -71,11 +81,11 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
 {
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
-
+    
     // Parse Ethernet header
     struct ethhdr *eth = data;
     if ((void *)(eth + 1) > data_end)
-        return XDP_PASS; // Malformed packet
+        return XDP_PASS;
 
     // Extract source MAC address
     struct mac_addr src_mac;
@@ -85,7 +95,7 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
     if (eth->h_proto == bpf_htons(ETH_P_IPV6))
         return XDP_DROP;
 
-    // Only process IPv4 packets for additional checks
+    // Check if this is IPv4 traffic
     if (eth->h_proto != bpf_htons(ETH_P_IP))
         return XDP_PASS; // Allow non-IPv4 traffic (ARP, etc.)
 
@@ -93,6 +103,26 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
     struct iphdr *ip = (void *)(eth + 1);
     if ((void *)(ip + 1) > data_end)
         return XDP_PASS; // Malformed packet
+
+    // Check if this is TCP traffic (for DoT blocking)
+    if (ip->protocol == IPPROTO_TCP) {
+        struct tcphdr *tcp = (void *)ip + (ip->ihl * 4);
+        if ((void *)(tcp + 1) > data_end)
+            return XDP_PASS;
+            
+        // Check for DoT (port 853)
+        if (tcp->dest == bpf_htons(853)) {
+            __u32 key = 0;
+            __u32 *allow_dot = bpf_map_lookup_elem(&global_settings, &key);
+            
+            // If map entry exists and value is 1, allow. Otherwise (0 or null), block.
+            if (allow_dot && *allow_dot == 1) {
+                // Allow DoT
+            } else {
+                return XDP_DROP; // Block DoT
+            }
+        }
+    }
 
     // Check if this is UDP traffic
     if (ip->protocol == IPPROTO_UDP) {
@@ -102,7 +132,7 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
             return XDP_PASS; // Malformed packet
         
         // Allow all DNS traffic (port 53) - redirect to DNS inspector via AF_XDP
-        if (udp->dest == bpf_htons(53)) {
+        if (udp->dest == bpf_htons(53) || udp->source == bpf_htons(53)) {
             // Check if source MAC is in the allowed list
             __u32 *allowed = bpf_map_lookup_elem(&allowed_macs, &src_mac);
             

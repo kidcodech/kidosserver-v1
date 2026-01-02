@@ -96,6 +96,14 @@ func runMigrations() error {
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS system_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
+
+	-- Default settings
+	INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_dot', 'true');
+
 	CREATE INDEX IF NOT EXISTS idx_user_devices_mac ON user_devices(mac_address);
 	CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_user_id ON user_blocked_domains(user_id);

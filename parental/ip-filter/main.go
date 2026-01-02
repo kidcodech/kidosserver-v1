@@ -23,10 +23,11 @@ const (
 )
 
 var (
-	allowedMACsMap *ebpf.Map
-	droppedMACsMap *ebpf.Map
-	statsMap       *ebpf.Map
-	xsksMap        *ebpf.Map
+	allowedMACsMap    *ebpf.Map
+	droppedMACsMap    *ebpf.Map
+	statsMap          *ebpf.Map
+	globalSettingsMap *ebpf.Map
+	xsksMap           *ebpf.Map
 )
 
 func main() {
@@ -46,10 +47,14 @@ func main() {
 	defer allowedMACsMap.Close()
 	defer droppedMACsMap.Close()
 	defer statsMap.Close()
+	defer globalSettingsMap.Close()
 
 	// Initial sync
 	if err := syncMACsFromDatabase(); err != nil {
-		log.Printf("Initial sync failed: %v", err)
+		log.Printf("Initial MAC sync failed: %v", err)
+	}
+	if err := syncSettingsFromDatabase(); err != nil {
+		log.Printf("Initial settings sync failed: %v", err)
 	}
 
 	// Setup signal handler for graceful shutdown
@@ -66,10 +71,13 @@ func main() {
 		select {
 		case <-ticker.C:
 			if err := syncMACsFromDatabase(); err != nil {
-				log.Printf("Sync error: %v", err)
+				log.Printf("MAC sync error: %v", err)
 			}
 			if err := processDroppedMACs(); err != nil {
 				log.Printf("Process dropped MACs error: %v", err)
+			}
+			if err := syncSettingsFromDatabase(); err != nil {
+				log.Printf("Settings sync error: %v", err)
 			}
 		case <-sigChan:
 			log.Println("Shutting down...")
@@ -168,6 +176,57 @@ func findLoadedMaps() error {
 	}
 	if xsksMap == nil {
 		log.Println("⚠ xsks_map not found - DNS redirection may not work (DNS inspector not running?)")
+	}
+
+	// Search for global_settings map
+	for mapID := ebpf.MapID(10000); mapID >= 1; mapID-- {
+		m, err := ebpf.NewMapFromID(mapID)
+		if err != nil {
+			continue
+		}
+		info, err := m.Info()
+		if err != nil {
+			m.Close()
+			continue
+		}
+		if info.Name == "global_settings" && info.Type == ebpf.Array {
+			globalSettingsMap = m
+			log.Printf("✓ Found global_settings map (ID %d)", mapID)
+			break
+		}
+		m.Close()
+	}
+	if globalSettingsMap == nil {
+		log.Println("⚠ global_settings map not found - DoT blocking may not work")
+	}
+
+	return nil
+}
+
+// syncSettingsFromDatabase reads system settings and updates eBPF maps
+func syncSettingsFromDatabase() error {
+	if globalSettingsMap == nil {
+		return nil
+	}
+
+	// Get block_dot setting (default true)
+	val, err := db.GetSystemSetting("block_dot")
+	if err != nil {
+		log.Printf("Failed to get block_dot setting: %v", err)
+		return err
+	}
+
+	// Default is to block (value 0)
+	// If setting is "false", we allow (value 1)
+	// If setting is "true" or empty, we block (value 0)
+	var mapVal uint32 = 0
+	if val == "false" {
+		mapVal = 1
+	}
+
+	key := uint32(0)
+	if err := globalSettingsMap.Put(&key, &mapVal); err != nil {
+		return fmt.Errorf("failed to update global_settings map: %w", err)
 	}
 
 	return nil
