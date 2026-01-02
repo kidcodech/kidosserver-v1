@@ -101,8 +101,15 @@ func runMigrations() error {
 		value TEXT NOT NULL
 	);
 
-	-- Default settings
-	INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_dot', 'true');
+	CREATE TABLE IF NOT EXISTS doh_providers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		ip_address TEXT NOT NULL,
+		is_enabled BOOLEAN DEFAULT 1,
+		is_system BOOLEAN DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(ip_address)
+	);
 
 	CREATE INDEX IF NOT EXISTS idx_user_devices_mac ON user_devices(mac_address);
 	CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
@@ -124,6 +131,50 @@ func runMigrations() error {
 	// We ignore the error because SQLite doesn't support "IF NOT EXISTS" for ADD COLUMN
 	DB.Exec("ALTER TABLE blocked_domain_logs ADD COLUMN query_type TEXT DEFAULT 'A'")
 
-	log.Println("✓ Database schema ready")
+	// Migration: Add is_system column to doh_providers if it doesn't exist
+	DB.Exec("ALTER TABLE doh_providers ADD COLUMN is_system BOOLEAN DEFAULT 0")
+
+	// Seed Data - System Settings
+	DB.Exec("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_dot', 'true')")
+	DB.Exec("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_doh', 'true')")
+
+	// Seed Data - DoH Providers
+	seedDoH := `
+	INSERT OR IGNORE INTO doh_providers (name, ip_address, is_system) VALUES 
+		('Google', '8.8.8.8', 1), ('Google', '8.8.4.4', 1),
+		('Cloudflare', '1.1.1.1', 1), ('Cloudflare', '1.0.0.1', 1), ('Cloudflare', '1.1.1.2', 1), ('Cloudflare', '1.0.0.2', 1), ('Cloudflare', '1.1.1.3', 1), ('Cloudflare', '1.0.0.3', 1),
+		('Quad9', '9.9.9.9', 1), ('Quad9', '149.112.112.112', 1), ('Quad9', '9.9.9.10', 1), ('Quad9', '149.112.112.10', 1), ('Quad9', '9.9.9.11', 1), ('Quad9', '149.112.112.11', 1),
+		('OpenDNS', '208.67.222.222', 1), ('OpenDNS', '208.67.220.220', 1), ('OpenDNS', '208.67.222.123', 1), ('OpenDNS', '208.67.220.123', 1),
+		('AdGuard', '94.140.14.14', 1), ('AdGuard', '94.140.15.15', 1), ('AdGuard', '94.140.14.140', 1), ('AdGuard', '94.140.14.141', 1),
+		('NextDNS', '45.90.28.0/24', 1), ('NextDNS', '45.90.30.0/24', 1),
+		('Mullvad', '194.242.2.2', 1), ('Mullvad', '194.242.2.3', 1), ('Mullvad', '194.242.2.4', 1),
+		('Control D', '76.76.2.0', 1), ('Control D', '76.76.10.0', 1),
+		('CleanBrowsing', '185.228.168.9', 1), ('CleanBrowsing', '185.228.169.9', 1), ('CleanBrowsing', '185.228.168.10', 1), ('CleanBrowsing', '185.228.169.11', 1),
+		('DNS.SB', '185.222.222.222', 1), ('DNS.SB', '45.11.45.11', 1);
+	`
+	if _, err := DB.Exec(seedDoH); err != nil {
+		log.Printf("Seed DoH error: %v", err)
+	}
+
+	// Ensure system providers are marked as system (in case they existed before migration)
+	updateSystem := `
+	UPDATE doh_providers SET is_system = 1 WHERE ip_address IN (
+		'8.8.8.8', '8.8.4.4',
+		'1.1.1.1', '1.0.0.1', '1.1.1.2', '1.0.0.2', '1.1.1.3', '1.0.0.3',
+		'9.9.9.9', '149.112.112.112', '9.9.9.10', '149.112.112.10', '9.9.9.11', '149.112.112.11',
+		'208.67.222.222', '208.67.220.220', '208.67.222.123', '208.67.220.123',
+		'94.140.14.14', '94.140.15.15', '94.140.14.140', '94.140.14.141',
+		'45.90.28.0/24', '45.90.30.0/24',
+		'194.242.2.2', '194.242.2.3', '194.242.2.4',
+		'76.76.2.0', '76.76.10.0',
+		'185.228.168.9', '185.228.169.9', '185.228.168.10', '185.228.169.11',
+		'185.222.222.222', '45.11.45.11'
+	);
+	`
+	if _, err := DB.Exec(updateSystem); err != nil {
+		log.Printf("Update system providers error: %v", err)
+	}
+
+	log.Println("✓ Database schema and seed data applied")
 	return nil
 }

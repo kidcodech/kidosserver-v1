@@ -125,6 +125,12 @@ func main() {
 	router.HandleFunc("/api/devices/unregistered/{mac}", deleteUnregisteredDevice).Methods("DELETE")
 	router.HandleFunc("/api/auth/register-device", registerDevice).Methods("POST")
 
+	// DoH Provider endpoints
+	router.HandleFunc("/api/doh/providers", getDoHProviders).Methods("GET")
+	router.HandleFunc("/api/doh/providers", addDoHProvider).Methods("POST")
+	router.HandleFunc("/api/doh/providers/{id}", deleteDoHProvider).Methods("DELETE")
+	router.HandleFunc("/api/doh/providers/{id}/toggle", toggleDoHProvider).Methods("PUT")
+
 	router.HandleFunc("/ws", handleWebSocket)
 
 	// Captive portal page for blocked domains
@@ -1518,4 +1524,70 @@ func updateSystemSetting(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"key": key, "value": req.Value})
+}
+
+// DoH Provider Handlers
+
+func getDoHProviders(w http.ResponseWriter, r *http.Request) {
+	providers, err := db.GetDoHProviders()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(providers)
+}
+
+func addDoHProvider(w http.ResponseWriter, r *http.Request) {
+	var p struct {
+		Name      string `json:"name"`
+		IPAddress string `json:"ip_address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := db.AddDoHProvider(p.Name, p.IPAddress); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func deleteDoHProvider(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.DeleteDoHProvider(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func toggleDoHProvider(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := db.ToggleDoHProvider(id, req.Enabled); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }

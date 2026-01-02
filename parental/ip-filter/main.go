@@ -28,6 +28,7 @@ var (
 	statsMap          *ebpf.Map
 	globalSettingsMap *ebpf.Map
 	xsksMap           *ebpf.Map
+	dohIPListMap      *ebpf.Map
 )
 
 func main() {
@@ -48,6 +49,9 @@ func main() {
 	defer droppedMACsMap.Close()
 	defer statsMap.Close()
 	defer globalSettingsMap.Close()
+	if dohIPListMap != nil {
+		defer dohIPListMap.Close()
+	}
 
 	// Initial sync
 	if err := syncMACsFromDatabase(); err != nil {
@@ -55,6 +59,9 @@ func main() {
 	}
 	if err := syncSettingsFromDatabase(); err != nil {
 		log.Printf("Initial settings sync failed: %v", err)
+	}
+	if err := syncDoHIPsFromDatabase(); err != nil {
+		log.Printf("Initial DoH IP sync failed: %v", err)
 	}
 
 	// Setup signal handler for graceful shutdown
@@ -78,6 +85,9 @@ func main() {
 			}
 			if err := syncSettingsFromDatabase(); err != nil {
 				log.Printf("Settings sync error: %v", err)
+			}
+			if err := syncDoHIPsFromDatabase(); err != nil {
+				log.Printf("DoH IP sync error: %v", err)
 			}
 		case <-sigChan:
 			log.Println("Shutting down...")
@@ -178,7 +188,7 @@ func findLoadedMaps() error {
 		log.Println("⚠ xsks_map not found - DNS redirection may not work (DNS inspector not running?)")
 	}
 
-	// Search for global_settings map
+	// Search for global_settings and doh_ip_list maps
 	for mapID := ebpf.MapID(10000); mapID >= 1; mapID-- {
 		m, err := ebpf.NewMapFromID(mapID)
 		if err != nil {
@@ -189,15 +199,30 @@ func findLoadedMaps() error {
 			m.Close()
 			continue
 		}
-		if info.Name == "global_settings" && info.Type == ebpf.Array {
+		if info.Name == "global_settings" {
 			globalSettingsMap = m
-			log.Printf("✓ Found global_settings map (ID %d)", mapID)
-			break
+			log.Printf("Found global_settings map (ID: %d)", mapID)
 		}
-		m.Close()
+		if info.Name == "doh_ip_list" {
+			dohIPListMap = m
+			log.Printf("Found doh_ip_list map (ID: %d)", mapID)
+		}
+	}
+
+	if allowedMACsMap == nil {
+		return fmt.Errorf("allowed_macs map not found")
+	}
+	if droppedMACsMap == nil {
+		return fmt.Errorf("dropped_macs map not found")
+	}
+	if statsMap == nil {
+		return fmt.Errorf("stats map not found")
 	}
 	if globalSettingsMap == nil {
 		log.Println("⚠ global_settings map not found - DoT blocking may not work")
+	}
+	if dohIPListMap == nil {
+		log.Println("⚠ doh_ip_list map not found - DoH blocking may not work")
 	}
 
 	return nil
@@ -210,23 +235,129 @@ func syncSettingsFromDatabase() error {
 	}
 
 	// Get block_dot setting (default true)
-	val, err := db.GetSystemSetting("block_dot")
+	valDot, err := db.GetSystemSetting("block_dot")
 	if err != nil {
 		log.Printf("Failed to get block_dot setting: %v", err)
-		return err
 	}
 
 	// Default is to block (value 0)
 	// If setting is "false", we allow (value 1)
 	// If setting is "true" or empty, we block (value 0)
-	var mapVal uint32 = 0
-	if val == "false" {
-		mapVal = 1
+	var mapValDot uint32 = 0
+	if valDot == "false" {
+		mapValDot = 1
 	}
 
-	key := uint32(0)
-	if err := globalSettingsMap.Put(&key, &mapVal); err != nil {
-		return fmt.Errorf("failed to update global_settings map: %w", err)
+	keyDot := uint32(0)
+	if err := globalSettingsMap.Put(&keyDot, &mapValDot); err != nil {
+		return fmt.Errorf("failed to update global_settings map (DoT): %w", err)
+	}
+
+	// Get block_doh setting (default true)
+	valDoH, err := db.GetSystemSetting("block_doh")
+	if err != nil {
+		log.Printf("Failed to get block_doh setting: %v", err)
+	}
+
+	var mapValDoH uint32 = 0
+	if valDoH == "false" {
+		mapValDoH = 1
+	}
+
+	keyDoH := uint32(1)
+	if err := globalSettingsMap.Put(&keyDoH, &mapValDoH); err != nil {
+		return fmt.Errorf("failed to update global_settings map (DoH): %w", err)
+	}
+
+	return nil
+}
+
+type LPMKey struct {
+	PrefixLen uint32
+	Data      uint32 // IPv4 address in network byte order
+}
+
+// syncDoHIPsFromDatabase reads DoH IPs from database and updates the eBPF map
+func syncDoHIPsFromDatabase() error {
+	if dohIPListMap == nil {
+		return nil
+	}
+
+	providers, err := db.GetDoHProviders()
+	if err != nil {
+		return fmt.Errorf("failed to get DoH providers: %w", err)
+	}
+
+	// 1. Calculate desired state (set of LPMKeys that should be in the map)
+	desiredKeys := make(map[LPMKey]bool)
+
+	for _, p := range providers {
+		if !p.IsEnabled {
+			continue
+		}
+
+		ipStr := p.IPAddress
+		ip, ipNet, err := net.ParseCIDR(ipStr)
+		var prefixLen int
+		var ipUint uint32
+
+		if err != nil {
+			// Try parsing as single IP
+			ip = net.ParseIP(ipStr)
+			if ip == nil {
+				log.Printf("Invalid IP/CIDR: %s", ipStr)
+				continue
+			}
+			ip = ip.To4()
+			if ip == nil {
+				continue // IPv6 not supported yet
+			}
+			prefixLen = 32
+			ipUint = uint32(ip[0]) | uint32(ip[1])<<8 | uint32(ip[2])<<16 | uint32(ip[3])<<24
+		} else {
+			ip = ip.To4()
+			if ip == nil {
+				continue
+			}
+			ones, _ := ipNet.Mask.Size()
+			prefixLen = ones
+			ipUint = uint32(ip[0]) | uint32(ip[1])<<8 | uint32(ip[2])<<16 | uint32(ip[3])<<24
+		}
+
+		key := LPMKey{
+			PrefixLen: uint32(prefixLen),
+			Data:      ipUint,
+		}
+		desiredKeys[key] = true
+	}
+
+	// 2. Iterate current map and remove keys that are not in desiredKeys
+	var key LPMKey
+	var val uint32
+	iter := dohIPListMap.Iterate()
+	var keysToDelete []LPMKey
+
+	for iter.Next(&key, &val) {
+		if !desiredKeys[key] {
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		log.Printf("Error iterating DoH map: %v", err)
+	}
+
+	for _, k := range keysToDelete {
+		if err := dohIPListMap.Delete(&k); err != nil {
+			log.Printf("Failed to delete DoH key: %v", err)
+		}
+	}
+
+	// 3. Add/Update desired keys
+	for k := range desiredKeys {
+		val := uint32(1)
+		if err := dohIPListMap.Put(&k, &val); err != nil {
+			log.Printf("Failed to update DoH key: %v", err)
+		}
 	}
 
 	return nil

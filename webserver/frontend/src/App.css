@@ -928,3 +928,85 @@ input:checked + .slider:before {
 .slider.round:before {
   border-radius: 50%;
 }
+
+/* DoH List Styles */
+.doh-list {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.5rem; /* Space for scrollbar */
+}
+
+.doh-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: #2a2a2a;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.doh-item .ip-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.doh-name {
+  font-weight: 600;
+  color: #fff;
+  min-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doh-ip {
+  font-family: monospace;
+  color: #9ca3af;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.system-badge {
+  background: #374151;
+  color: #9ca3af;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.small-switch {
+  transform: scale(0.8);
+  margin: 0;
+}
+
+/* Custom scrollbar for DoH list */
+.doh-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.doh-list::-webkit-scrollbar-track {
+  background: #1a1a1a;
+  border-radius: 4px;
+}
+
+.doh-list::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
+}
+
+.doh-list::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}

@@ -183,6 +183,9 @@ function App() {
   const [editingDeviceName, setEditingDeviceName] = useState(null)
   const [editDeviceNameValue, setEditDeviceNameValue] = useState('')
   const [blockDoT, setBlockDoT] = useState(true)
+  const [blockDoH, setBlockDoH] = useState(true)
+  const [dohProviders, setDohProviders] = useState([])
+  const [newDoHProvider, setNewDoHProvider] = useState({ name: '', ip_address: '' })
 
   useEffect(() => {
     // Fetch initial data
@@ -193,6 +196,7 @@ function App() {
     fetchUsers()
     fetchUnregisteredDevices()
     fetchSystemSettings()
+    fetchDoHProviders()
 
     // Auto-refresh every second
     const refreshInterval = setInterval(() => {
@@ -242,29 +246,110 @@ function App() {
 
   const fetchSystemSettings = async () => {
     try {
-      const response = await fetch('/api/system/settings/block_dot')
-      if (response.ok) {
-        const data = await response.json()
-        setBlockDoT(data.value === 'true')
+      const resDot = await fetch('/api/system/settings/block_dot')
+      if (resDot.ok) {
+        const data = await resDot.json()
+        setBlockDoT(data.value !== 'false')
+      }
+      
+      const resDoH = await fetch('/api/system/settings/block_doh')
+      if (resDoH.ok) {
+        const data = await resDoH.json()
+        setBlockDoH(data.value !== 'false')
       }
     } catch (error) {
       console.error('Error fetching system settings:', error)
     }
   }
 
-  const toggleBlockDoT = async () => {
+  const fetchDoHProviders = async () => {
     try {
-      const newValue = !blockDoT
-      const response = await fetch('/api/system/settings/block_dot', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: newValue.toString() })
-      })
+      const response = await fetch('/api/doh/providers')
       if (response.ok) {
-        setBlockDoT(newValue)
+        const data = await response.json()
+        setDohProviders(data || [])
       }
     } catch (error) {
-      console.error('Error updating system settings:', error)
+      console.error('Error fetching DoH providers:', error)
+    }
+  }
+
+  const toggleBlockDoT = async () => {
+    const newValue = !blockDoT
+    try {
+      await fetch('/api/system/settings/block_dot', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: newValue ? 'true' : 'false' })
+      })
+      setBlockDoT(newValue)
+    } catch (error) {
+      console.error('Error updating block_dot setting:', error)
+    }
+  }
+
+  const toggleBlockDoH = async () => {
+    const newValue = !blockDoH
+    try {
+      await fetch('/api/system/settings/block_doh', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: newValue ? 'true' : 'false' })
+      })
+      setBlockDoH(newValue)
+    } catch (error) {
+      console.error('Error updating block_doh setting:', error)
+    }
+  }
+
+  const addDoHProvider = async () => {
+    if (!newDoHProvider.name || !newDoHProvider.ip_address) {
+      alert('Please enter both name and IP address')
+      return
+    }
+
+    // Simple IPv4 validation
+    const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+    if (!ipv4Regex.test(newDoHProvider.ip_address)) {
+      alert('Please enter a valid IPv4 address')
+      return
+    }
+
+    try {
+      await fetch('/api/doh/providers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newDoHProvider)
+      })
+      setNewDoHProvider({ name: '', ip_address: '' })
+      fetchDoHProviders()
+    } catch (error) {
+      console.error('Error adding DoH provider:', error)
+    }
+  }
+
+  const deleteDoHProvider = async (id) => {
+    if (!confirm('Are you sure you want to delete this provider?')) return
+    try {
+      await fetch(`/api/doh/providers/${id}`, {
+        method: 'DELETE'
+      })
+      fetchDoHProviders()
+    } catch (error) {
+      console.error('Error deleting DoH provider:', error)
+    }
+  }
+
+  const toggleDoHProviderEnabled = async (id, currentStatus) => {
+    try {
+      await fetch(`/api/doh/providers/${id}/toggle`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !currentStatus })
+      })
+      fetchDoHProviders()
+    } catch (error) {
+      console.error('Error toggling DoH provider:', error)
     }
   }
 
@@ -1598,6 +1683,90 @@ function App() {
               Block DNS over TLS traffic on port 853. This prevents devices from bypassing DNS filtering by using encrypted DNS.
               {blockDoT ? <span className="status-blocked">Currently Blocked</span> : <span className="status-allowed">Currently Allowed</span>}
             </p>
+          </div>
+
+          <div className="setting-card">
+            <div className="setting-header">
+              <h3>DNS over HTTPS (DoH)</h3>
+              <label className="switch">
+                <input 
+                  type="checkbox" 
+                  checked={blockDoH} 
+                  onChange={toggleBlockDoH}
+                />
+                <span className="slider round"></span>
+              </label>
+            </div>
+            <p className="setting-description">
+              Block known DNS over HTTPS providers on port 443. This prevents devices from bypassing DNS filtering by using encrypted DNS over HTTPS.
+              {blockDoH ? <span className="status-blocked">Currently Blocked</span> : <span className="status-allowed">Currently Allowed</span>}
+            </p>
+
+            {blockDoH && (
+              <div className="doh-providers-section" style={{marginTop: '1.5rem', borderTop: '1px solid #333', paddingTop: '1rem'}}>
+                <h4>Blocked DoH Providers</h4>
+                
+                <div className="add-domain-form" style={{marginBottom: '1rem'}}>
+                  <input 
+                    type="text" 
+                    value={newDoHProvider.name}
+                    onChange={(e) => setNewDoHProvider({...newDoHProvider, name: e.target.value})}
+                    placeholder="Provider Name"
+                    className="domain-input"
+                    style={{flex: 1}}
+                  />
+                  <input 
+                    type="text" 
+                    value={newDoHProvider.ip_address}
+                    onChange={(e) => setNewDoHProvider({...newDoHProvider, ip_address: e.target.value})}
+                    placeholder="IP Address or CIDR"
+                    className="domain-input"
+                    style={{flex: 2}}
+                  />
+                  <button onClick={addDoHProvider} className="btn btn-primary">
+                    Add
+                  </button>
+                </div>
+
+                <div className="ip-list doh-list">
+                  {[...dohProviders].sort((a, b) => {
+                    // Manual providers first (is_system: false < true)
+                    if (a.is_system !== b.is_system) {
+                      return a.is_system ? 1 : -1
+                    }
+                    return a.name.localeCompare(b.name)
+                  }).map((provider) => (
+                    <div key={provider.id} className="ip-item doh-item">
+                      <div className="ip-info">
+                        <span className="doh-name">{provider.name}</span>
+                        <span className="doh-ip">{provider.ip_address}</span>
+                        {provider.is_system && <span className="system-badge">System</span>}
+                      </div>
+                      <div className="action-buttons">
+                        {!provider.is_system && (
+                          <button 
+                            onClick={() => deleteDoHProvider(provider.id)} 
+                            className="btn btn-small btn-danger"
+                            title="Delete custom provider"
+                            style={{ marginRight: '0.5rem' }}
+                          >
+                            🗑️
+                          </button>
+                        )}
+                        <label className="switch small-switch">
+                          <input 
+                            type="checkbox" 
+                            checked={provider.is_enabled} 
+                            onChange={() => toggleDoHProviderEnabled(provider.id, provider.is_enabled)}
+                          />
+                          <span className="slider round"></span>
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -66,12 +66,28 @@ struct {
 
 // Global settings map
 // Key: 0 (block_dot), Value: 1 = Allow, 0 = Block (default)
+// Key: 1 (block_doh), Value: 1 = Allow, 0 = Block (default)
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
+    __uint(max_entries, 2);
     __type(key, __u32);
     __type(value, __u32);
 } global_settings SEC(".maps");
+
+// LPM Trie key for IPv4
+struct ipv4_lpm_key {
+    __u32 prefixlen;
+    __u32 data;
+};
+
+// Map to store blocked DoH IPs (LPM Trie)
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 1000);
+    __type(key, struct ipv4_lpm_key);
+    __type(value, __u32);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} doh_ip_list SEC(".maps");
 
 #define STAT_ALLOWED 0
 #define STAT_DROPPED 1
@@ -104,7 +120,7 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
     if ((void *)(ip + 1) > data_end)
         return XDP_PASS; // Malformed packet
 
-    // Check if this is TCP traffic (for DoT blocking)
+    // Check if this is TCP traffic (for DoT and DoH blocking)
     if (ip->protocol == IPPROTO_TCP) {
         struct tcphdr *tcp = (void *)ip + (ip->ihl * 4);
         if ((void *)(tcp + 1) > data_end)
@@ -120,6 +136,24 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
                 // Allow DoT
             } else {
                 return XDP_DROP; // Block DoT
+            }
+        }
+
+        // Check for DoH (port 443)
+        if (tcp->dest == bpf_htons(443)) {
+            __u32 key = 1; // block_doh setting
+            __u32 *allow_doh = bpf_map_lookup_elem(&global_settings, &key);
+            
+            // If allow_doh is 0 (default/blocked), check the IP list
+            if (!allow_doh || *allow_doh == 0) {
+                struct ipv4_lpm_key ip_key;
+                ip_key.prefixlen = 32; // Lookup with full length
+                ip_key.data = ip->daddr;
+                
+                __u32 *val = bpf_map_lookup_elem(&doh_ip_list, &ip_key);
+                if (val) {
+                    return XDP_DROP; // Block DoH IP
+                }
             }
         }
     }
