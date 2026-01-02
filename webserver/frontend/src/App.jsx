@@ -308,10 +308,10 @@ function App() {
       return
     }
 
-    // Simple IPv4 validation
-    const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
-    if (!ipv4Regex.test(newDoHProvider.ip_address)) {
-      alert('Please enter a valid IPv4 address')
+    // IPv4 or CIDR validation
+    const ipv4CidrRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\/(?:3[0-2]|[12]?[0-9]))?$/
+    if (!ipv4CidrRegex.test(newDoHProvider.ip_address)) {
+      alert('Please enter a valid IPv4 address or CIDR (e.g., 1.2.3.4 or 1.2.3.0/24)')
       return
     }
 
