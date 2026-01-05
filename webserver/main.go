@@ -96,6 +96,8 @@ func main() {
 	router.HandleFunc("/api/dns/blocked-logs", getBlockedDomainLogs).Methods("GET")
 	router.HandleFunc("/api/dns/blocked-logs", clearBlockedDomainLogs).Methods("DELETE")
 	router.HandleFunc("/api/dns/log-block", logBlockedDomain).Methods("POST")
+	router.HandleFunc("/api/logs/encrypted-dns", getEncryptedDNSLogs).Methods("GET")
+	router.HandleFunc("/api/logs/encrypted-dns", clearEncryptedDNSLogs).Methods("DELETE")
 	router.HandleFunc("/api/client/info", getClientInfo).Methods("GET")
 	router.HandleFunc("/api/system/health", getSystemHealth).Methods("GET")
 	router.HandleFunc("/api/system/settings/{key}", getSystemSetting).Methods("GET")
@@ -461,6 +463,51 @@ func clearBlockedDomainLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+// getEncryptedDNSLogs retrieves blocked encrypted DNS logs
+func getEncryptedDNSLogs(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil {
+			limit = l
+		}
+	}
+
+	date := r.URL.Query().Get("date")
+	userIDStr := r.URL.Query().Get("user_id")
+	deviceMAC := r.URL.Query().Get("device_mac")
+
+	var userID *int
+	if userIDStr != "" {
+		if id, err := strconv.Atoi(userIDStr); err == nil {
+			userID = &id
+		}
+	}
+
+	logs, err := db.GetBlockedEncryptedDNSLogs(limit, date, userID, deviceMAC)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch encrypted DNS logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return empty array instead of null if no logs
+	if logs == nil {
+		logs = []db.EncryptedDNSLog{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
+}
+
+// clearEncryptedDNSLogs clears all encrypted DNS logs
+func clearEncryptedDNSLogs(w http.ResponseWriter, r *http.Request) {
+	if err := db.ClearEncryptedDNSLogs(); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to clear encrypted DNS logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
 }
 
@@ -1590,21 +1637,4 @@ func toggleDoHProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-}
-
-// Encrypted DNS Logs Handler
-func getEncryptedDNSLogs(w http.ResponseWriter, r *http.Request) {
-	logs, err := db.GetBlockedEncryptedDNSLogs(100)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get logs: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Return empty array instead of null if no logs
-	if logs == nil {
-		logs = []db.EncryptedDNSLog{}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(logs)
 }

@@ -532,7 +532,7 @@ func printStats() {
 	if err := statsMap.Lookup(&keyAllowed, &allowed); err == nil {
 		if err := statsMap.Lookup(&keyDropped, &dropped); err == nil {
 			if allowed > 0 || dropped > 0 {
-				log.Printf("Stats: Allowed=%d, Dropped=%d", allowed, dropped)
+				// log.Printf("Stats: Allowed=%d, Dropped=%d", allowed, dropped)
 			}
 		}
 	}
@@ -581,7 +581,7 @@ func processDroppedMACs() error {
 	}
 
 	if recorded > 0 {
-		log.Printf("Recorded %d unregistered device attempt(s)", recorded)
+		// log.Printf("Recorded %d unregistered device attempt(s)", recorded)
 	}
 
 	return nil
@@ -631,6 +631,7 @@ func processEvents() {
 
 		macStr := macToString(event.MAC[:])
 		destIP := intToIP(event.DestIP).String()
+		srcIP := intToIP(event.SrcIP).String()
 
 		var protocol string
 		switch event.Protocol {
@@ -676,7 +677,7 @@ func processEvents() {
 
 		log.Printf("Blocked %s from %s (%s) to %s", protocol, macStr, deviceName, destIP)
 
-		if err := db.LogBlockedEncryptedDNS(macStr, deviceName, userID, userName, destIP, protocol); err != nil {
+		if err := db.LogBlockedEncryptedDNS(macStr, deviceName, srcIP, userID, userName, destIP, protocol); err != nil {
 			log.Printf("Failed to log blocked encrypted DNS: %v", err)
 		}
 	}

@@ -115,6 +115,7 @@ func runMigrations() error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		device_mac TEXT NOT NULL,
 		device_name TEXT,
+		device_ip TEXT,
 		user_id INTEGER,
 		user_name TEXT,
 		dns_server_ip TEXT NOT NULL,
@@ -146,6 +147,9 @@ func runMigrations() error {
 
 	// Migration: Add is_system column to doh_providers if it doesn't exist
 	DB.Exec("ALTER TABLE doh_providers ADD COLUMN is_system BOOLEAN DEFAULT 0")
+
+	// Migration: Add device_ip column to blocked_encrypted_dns_logs if it doesn't exist
+	DB.Exec("ALTER TABLE blocked_encrypted_dns_logs ADD COLUMN device_ip TEXT")
 
 	// Seed Data - System Settings
 	DB.Exec("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_dot', 'true')")

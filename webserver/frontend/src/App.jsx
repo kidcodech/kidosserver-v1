@@ -189,36 +189,13 @@ function App() {
   const [dohProviders, setDohProviders] = useState([])
   const [newDoHProvider, setNewDoHProvider] = useState({ name: '', ip_address: '' })
 
+  // Setup WebSocket connection once
   useEffect(() => {
-    // Fetch initial data
-    fetchPackets()
-    fetchDNSRequests()
-    fetchBlockedDomains()
-    fetchClientInfo()
-    fetchUsers()
-    fetchUnregisteredDevices()
-    fetchSystemSettings()
-    fetchDoHProviders()
-
-    // Auto-refresh every second
-    const refreshInterval = setInterval(() => {
-      if (activeTab === 'packets') {
-        fetchPackets()
-      }
-      if (activeTab === 'logs' && logsSubTab === 'dns') {
-        fetchDNSRequests()
-      }
-      if (activeTab === 'users' && usersSubTab === 'devices') {
-        fetchUnregisteredDevices()
-      }
-    }, 1000)
-
-    // Setup WebSocket connection
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const websocket = new WebSocket(`${protocol}//${window.location.host}/ws`)
     
     websocket.onopen = () => {
-      console.log('WebSocket connected')
+      // console.log('WebSocket connected')
     }
 
     websocket.onmessage = (event) => {
@@ -233,18 +210,50 @@ function App() {
     }
 
     websocket.onclose = () => {
-      console.log('WebSocket disconnected')
+      // console.log('WebSocket disconnected')
     }
 
     setWs(websocket)
 
     return () => {
-      clearInterval(refreshInterval)
       if (websocket) {
         websocket.close()
       }
     }
   }, [])
+
+  // Initial data fetch
+  useEffect(() => {
+    if (activeTab === 'traffic') {
+      fetchPackets()
+    }
+    fetchDNSRequests()
+    fetchBlockedDomains()
+    fetchClientInfo()
+    fetchUsers()
+    fetchUnregisteredDevices()
+    fetchSystemSettings()
+    fetchDoHProviders()
+  }, [])
+
+  // Auto-refresh based on active tab
+  useEffect(() => {
+    const refreshInterval = setInterval(() => {
+      if (activeTab === 'traffic') {
+        fetchPackets()
+      }
+      if (activeTab === 'logs' && logsSubTab === 'dns') {
+        fetchDNSRequests()
+      }
+      if (activeTab === 'users' && usersSubTab === 'devices') {
+        fetchUnregisteredDevices()
+      }
+    }, 1000)
+
+    return () => {
+      clearInterval(refreshInterval)
+    }
+  }, [activeTab, logsSubTab, usersSubTab])
 
   const fetchSystemSettings = async () => {
     try {
@@ -393,8 +402,9 @@ function App() {
     }
   }, [activeTab, logsSubTab, logFilterDate, logFilterType, logFilterValue])
 
-  // Update traffic graph when packets change
+  // Update traffic graph when packets change (only in traffic tab)
   useEffect(() => {
+    if (activeTab !== 'traffic') return
     if (packets.length === 0) return
     
     const now = Date.now()
@@ -427,7 +437,7 @@ function App() {
       }
       return newHistory
     })
-  }, [packets, maxHistoryLength])
+  }, [packets, maxHistoryLength, activeTab])
 
   const fetchPackets = async () => {
     try {
@@ -499,6 +509,22 @@ function App() {
       }
     } catch (error) {
       console.error('Error clearing blocked logs:', error)
+    }
+  }
+
+  const clearEncryptedDNSLogs = async () => {
+    if (!confirm('Are you sure you want to clear all encrypted DNS logs?')) {
+      return
+    }
+    try {
+      const response = await fetch('/api/logs/encrypted-dns', {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        setEncryptedDNSLogs([])
+      }
+    } catch (error) {
+      console.error('Error clearing encrypted DNS logs:', error)
     }
   }
 
@@ -879,10 +905,18 @@ function App() {
 
   const fetchEncryptedDNSLogs = async () => {
     try {
-      const response = await fetch('/api/logs/encrypted-dns')
+      let url = '/api/logs/encrypted-dns?'
+      // If date is cleared, default to today
+      const dateParam = logFilterDate || new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+      url += `date=${dateParam}&`
+      
+      if (logFilterType === 'user' && logFilterValue) url += `user_id=${logFilterValue}&`
+      if (logFilterType === 'device' && logFilterValue) url += `device_mac=${logFilterValue}&`
+
+      const response = await fetch(url)
       if (response.ok) {
         const data = await response.json()
-        setEncryptedDNSLogs(data)
+        setEncryptedDNSLogs(data || [])
       }
     } catch (error) {
       console.error('Error fetching encrypted DNS logs:', error)
@@ -1341,10 +1375,74 @@ function App() {
           {logsSubTab === 'encrypted' && (
             <>
               <div className="controls">
-                <div style={{display: 'flex', gap: '10px', marginLeft: 'auto'}}>
+                <div className="log-filters">
+                  <input 
+                    type="date" 
+                    value={logFilterDate}
+                    onChange={(e) => setLogFilterDate(e.target.value)}
+                    className="filter-input"
+                    placeholder="Filter by date"
+                  />
+                  <select 
+                    value={logFilterType}
+                    onChange={(e) => {
+                      setLogFilterType(e.target.value)
+                      setLogFilterValue('')
+                    }}
+                    className="filter-input"
+                  >
+                    <option value="">All Entries</option>
+                    <option value="user">Filter by User</option>
+                    <option value="device">Filter by Device</option>
+                  </select>
+                  {logFilterType === 'user' && (
+                    <select 
+                      value={logFilterValue}
+                      onChange={(e) => setLogFilterValue(e.target.value)}
+                      className="filter-input"
+                    >
+                      <option value="">Select User</option>
+                      {users.map(user => (
+                        <option key={user.id} value={user.id}>
+                          {user.display_name} ({user.username})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {logFilterType === 'device' && (
+                    <select 
+                      value={logFilterValue}
+                      onChange={(e) => setLogFilterValue(e.target.value)}
+                      className="filter-input"
+                    >
+                      <option value="">Select Device</option>
+                      {users.flatMap(user => 
+                        (user.devices || []).map(device => ({
+                          mac: device.mac_address,
+                          name: `${device.device_name || 'Unnamed'} (${user.display_name})`
+                        }))
+                      ).map((device, idx) => (
+                        <option key={idx} value={device.mac}>
+                          {device.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div style={{display: 'flex', gap: '10px'}}>
                   <button onClick={fetchEncryptedDNSLogs} className="btn btn-primary">
                     🔄 Refresh
                   </button>
+                  <button onClick={clearEncryptedDNSLogs} className="btn btn-danger">
+                    🗑️ Clear All
+                  </button>
+                </div>
+              </div>
+
+              <div className="stats-summary">
+                <div className="stat-card">
+                  <h3>Total Encrypted DNS Blocks</h3>
+                  <p className="stat-value">{encryptedDNSLogs.length}</p>
                 </div>
               </div>
 
@@ -1357,13 +1455,14 @@ function App() {
                       <th>Type</th>
                       <th>User</th>
                       <th>Device</th>
+                      <th>Device IP</th>
                       <th>MAC Address</th>
                     </tr>
                   </thead>
                   <tbody>
                     {encryptedDNSLogs.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="no-data">No encrypted DNS blocks captured yet</td>
+                        <td colSpan="7" className="no-data">No encrypted DNS blocks captured yet</td>
                       </tr>
                     ) : (
                       encryptedDNSLogs.map((log, idx) => (
@@ -1375,6 +1474,7 @@ function App() {
                           </td>
                           <td>{log.user_name || '-'}</td>
                           <td>{log.device_name || '-'}</td>
+                          <td className="ip-address">{log.device_ip || '-'}</td>
                           <td className="ip-address">{log.device_mac}</td>
                         </tr>
                       ))
@@ -1493,16 +1593,14 @@ function App() {
                     <div className="ip-list">
                       {selectedUser.devices && selectedUser.devices.length > 0 ? (
                         selectedUser.devices.map((device) => (
-                          <div key={device.id} className="ip-item">
-                            <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1}}>
-                              <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
-                                <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b'}}>{device.mac_address}</span>
-                                {device.ip_address && (
-                                  <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#888', fontSize: '0.9rem'}}>({device.ip_address})</span>
-                                )}
-                              </div>
+                          <div key={device.id} className="ip-item" style={{display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'nowrap', marginBottom: '0.75rem', padding: '0.5rem'}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem', flex: 1, minWidth: 0}}>
+                              <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b', whiteSpace: 'nowrap'}}>{device.mac_address}</span>
+                              {device.ip_address && (
+                                <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#888', fontSize: '0.9rem', whiteSpace: 'nowrap'}}>({device.ip_address})</span>
+                              )}
                               {editingDeviceName === device.id ? (
-                                <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                                <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 1}}>
                                   <input 
                                     type="text"
                                     value={editDeviceNameValue}
@@ -1510,7 +1608,7 @@ function App() {
                                     onKeyPress={(e) => e.key === 'Enter' && updateDeviceName(device.id, editDeviceNameValue)}
                                     placeholder="Device name"
                                     className="domain-input"
-                                    style={{flex: 1, padding: '0.5rem', fontSize: '0.9rem'}}
+                                    style={{flex: 1, padding: '0.5rem', fontSize: '0.9rem', minWidth: '150px'}}
                                     autoFocus
                                   />
                                   <button 
@@ -1527,8 +1625,8 @@ function App() {
                                   </button>
                                 </div>
                               ) : (
-                                <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
-                                  <span style={{color: '#9ca3af', fontSize: '0.9rem'}}>
+                                <>
+                                  <span style={{color: '#9ca3af', fontSize: '0.9rem', whiteSpace: 'nowrap'}}>
                                     {device.device_name || 'Unnamed device'}
                                   </span>
                                   <button 
@@ -1537,17 +1635,18 @@ function App() {
                                       setEditDeviceNameValue(device.device_name || ''); 
                                     }}
                                     className="btn btn-small btn-primary"
-                                    style={{padding: '0.25rem 0.5rem', fontSize: '0.75rem'}}
+                                    style={{padding: '0.25rem 0.5rem', fontSize: '0.75rem', whiteSpace: 'nowrap'}}
                                   >
                                     ✏️ Edit
                                   </button>
-                                </div>
+                                </>
                               )}
                             </div>
-                            <span className="ip-date">Added: {new Date(device.created_at).toLocaleDateString()}</span>
+                            <span className="ip-date" style={{whiteSpace: 'nowrap', marginRight: '1rem', color: '#9ca3af'}}>Added: {new Date(device.created_at).toLocaleDateString()}</span>
                             <button 
                               onClick={() => removeUserMAC(selectedUser.id, device.id)} 
                               className="btn btn-small btn-danger"
+                              style={{flexShrink: 0}}
                             >
                               🗑️
                             </button>
