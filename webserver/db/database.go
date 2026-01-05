@@ -111,6 +111,18 @@ func runMigrations() error {
 		UNIQUE(ip_address)
 	);
 
+	CREATE TABLE IF NOT EXISTS blocked_encrypted_dns_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		device_mac TEXT NOT NULL,
+		device_name TEXT,
+		user_id INTEGER,
+		user_name TEXT,
+		dns_server_ip TEXT NOT NULL,
+		protocol TEXT NOT NULL,
+		blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_devices_mac ON user_devices(mac_address);
 	CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_user_id ON user_blocked_domains(user_id);
@@ -119,6 +131,7 @@ func runMigrations() error {
 	CREATE INDEX IF NOT EXISTS idx_blocked_logs_date ON blocked_domain_logs(blocked_at);
 	CREATE INDEX IF NOT EXISTS idx_blocked_logs_user ON blocked_domain_logs(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_logs_device ON blocked_domain_logs(device_mac);
+	CREATE INDEX IF NOT EXISTS idx_encrypted_logs_date ON blocked_encrypted_dns_logs(blocked_at);
 	`
 
 	_, err := DB.Exec(schema)

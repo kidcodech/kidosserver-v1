@@ -1591,3 +1591,20 @@ func toggleDoHProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 }
+
+// Encrypted DNS Logs Handler
+func getEncryptedDNSLogs(w http.ResponseWriter, r *http.Request) {
+	logs, err := db.GetBlockedEncryptedDNSLogs(100)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get logs: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return empty array instead of null if no logs
+	if logs == nil {
+		logs = []db.EncryptedDNSLog{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
+}

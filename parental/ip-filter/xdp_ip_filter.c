@@ -68,9 +68,10 @@ struct {
 // Key: 0 (block_dot), Value: 1 = Allow, 0 = Block (default)
 // Key: 1 (block_doh), Value: 1 = Allow, 0 = Block (default)
 // Key: 2 (block_doq), Value: 1 = Allow, 0 = Block (default)
+// Key: 3 (gateway_ip), Value: IP address (network byte order)
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 3);
+    __uint(max_entries, 4);
     __type(key, __u32);
     __type(value, __u32);
 } global_settings SEC(".maps");
@@ -89,6 +90,21 @@ struct {
     __type(value, __u32);
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } doh_ip_list SEC(".maps");
+
+// Event structure for blocked encrypted DNS
+struct encrypted_dns_event {
+    __u8 mac[6];
+    __u32 src_ip;
+    __u32 dest_ip;
+    __u32 protocol; // 0=DoT, 1=DoH, 2=DoQ
+};
+
+// Perf event map for logging
+struct {
+    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+    __uint(key_size, sizeof(int));
+    __uint(value_size, sizeof(int));
+} events SEC(".maps");
 
 #define STAT_ALLOWED 0
 #define STAT_DROPPED 1
@@ -136,6 +152,13 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
             if (allow_dot && *allow_dot == 1) {
                 // Allow DoT
             } else {
+                struct encrypted_dns_event evt = {};
+                __builtin_memcpy(evt.mac, src_mac.addr, 6);
+                evt.src_ip = ip->saddr;
+                evt.dest_ip = ip->daddr;
+                evt.protocol = 0; // DoT
+                bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
+                
                 return XDP_DROP; // Block DoT
             }
         }
@@ -153,6 +176,13 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
                 
                 __u32 *val = bpf_map_lookup_elem(&doh_ip_list, &ip_key);
                 if (val) {
+                    struct encrypted_dns_event evt = {};
+                    __builtin_memcpy(evt.mac, src_mac.addr, 6);
+                    evt.src_ip = ip->saddr;
+                    evt.dest_ip = ip->daddr;
+                    evt.protocol = 1; // DoH
+                    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
+
                     return XDP_DROP; // Block DoH IP
                 }
             }
@@ -174,6 +204,13 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
             if (allow_doq && *allow_doq == 1) {
                 // Allow DoQ
             } else {
+                struct encrypted_dns_event evt = {};
+                __builtin_memcpy(evt.mac, src_mac.addr, 6);
+                evt.src_ip = ip->saddr;
+                evt.dest_ip = ip->daddr;
+                evt.protocol = 2; // DoQ
+                bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
+
                 return XDP_DROP; // Block DoQ
             }
         }
@@ -208,6 +245,32 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
 
     // Extract destination IP address
     __u32 dst_ip = ip->daddr;
+
+    // Allow HTTP traffic (port 80) to support Captive Portal redirection
+    // This allows unregistered devices to reach the webserver via DNAT
+    if (ip->protocol == IPPROTO_TCP) {
+        struct tcphdr *tcp = (void *)ip + (ip->ihl * 4);
+        if ((void *)(tcp + 1) <= data_end) {
+            if (tcp->dest == bpf_htons(80)) {
+                return XDP_PASS;
+            }
+        }
+    }
+    
+    // Check if destination is the Gateway IP
+    __u32 key_gw = 3;
+    __u32 *gw_ip = bpf_map_lookup_elem(&global_settings, &key_gw);
+    if (gw_ip && *gw_ip != 0) {
+        if (dst_ip == *gw_ip) {
+             // Allow traffic to gateway (webserver/DNS)
+            __u32 stat_key = STAT_ALLOWED;
+            __u64 *count = bpf_map_lookup_elem(&stats, &stat_key);
+            if (count) {
+                __sync_fetch_and_add(count, 1);
+            }
+            return XDP_PASS;
+        }
+    }
     
     // Allow all traffic to local network (192.168.0.0/16)
     // Check if destination is 192.168.x.x

@@ -483,3 +483,22 @@ func ClearBlockedDomainLogs() error {
 	_, err := DB.Exec("DELETE FROM blocked_domain_logs")
 	return err
 }
+
+// GetDeviceOwner returns user info for a given MAC address
+func GetDeviceOwner(mac string) (*int, string, string, error) {
+	var userID int
+	var userName string
+	var deviceName string
+
+	err := DB.QueryRow(`
+		SELECT u.id, u.username, d.device_name 
+		FROM user_devices d
+		JOIN users u ON d.user_id = u.id
+		WHERE d.mac_address = ?`, mac).Scan(&userID, &userName, &deviceName)
+
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	return &userID, userName, deviceName, nil
+}

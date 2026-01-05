@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/perf"
 	"github.com/kidcodech/kidosserver-v1/webserver/db"
 )
 
@@ -29,7 +32,16 @@ var (
 	globalSettingsMap *ebpf.Map
 	xsksMap           *ebpf.Map
 	dohIPListMap      *ebpf.Map
+	eventsMap         *ebpf.Map
 )
+
+// EncryptedDNSEvent matches the C struct
+type EncryptedDNSEvent struct {
+	MAC      [6]byte
+	SrcIP    uint32
+	DestIP   uint32
+	Protocol uint32
+}
 
 func main() {
 	log.Println("Starting MAC Filter Sync Daemon...")
@@ -51,6 +63,10 @@ func main() {
 	defer globalSettingsMap.Close()
 	if dohIPListMap != nil {
 		defer dohIPListMap.Close()
+	}
+	if eventsMap != nil {
+		defer eventsMap.Close()
+		go processEvents()
 	}
 
 	// Initial sync
@@ -207,6 +223,10 @@ func findLoadedMaps() error {
 			dohIPListMap = m
 			log.Printf("Found doh_ip_list map (ID: %d)", mapID)
 		}
+		if info.Name == "events" {
+			eventsMap = m
+			log.Printf("Found events map (ID: %d)", mapID)
+		}
 	}
 
 	if allowedMACsMap == nil {
@@ -267,6 +287,28 @@ func syncSettingsFromDatabase() error {
 	keyDoQ := uint32(2)
 	if err := globalSettingsMap.Put(&keyDoQ, &mapValDoQ); err != nil {
 		log.Printf("Failed to update block_doq setting: %v", err)
+	}
+
+	// Update Gateway IP
+	// Try br1 first (bridge interface usually holds the IP)
+	gwIP, err := getInterfaceIP("br1")
+	if err != nil {
+		// Fallback to veth-kidos-app if br1 fails
+		gwIP, err = getInterfaceIP(interfaceName)
+	}
+
+	if err != nil {
+		// Don't log error every time, just once or if it changes?
+		// Actually, logging is fine, it's every 5 seconds.
+		// But if interface is down, it might spam.
+		// Let's log only if it succeeds or fails with a new error?
+		// For now, just log.
+		// log.Printf("Failed to get interface IP: %v", err)
+	} else {
+		keyGw := uint32(3)
+		if err := globalSettingsMap.Put(&keyGw, &gwIP); err != nil {
+			log.Printf("Failed to update gateway IP: %v", err)
+		}
 	}
 
 	// Get block_doh setting (default true)
@@ -543,4 +585,127 @@ func processDroppedMACs() error {
 	}
 
 	return nil
+}
+
+// processEvents reads perf events from the eBPF map
+func processEvents() {
+	rd, err := perf.NewReader(eventsMap, os.Getpagesize())
+	if err != nil {
+		log.Printf("Failed to create perf reader: %v", err)
+		return
+	}
+	defer rd.Close()
+
+	log.Println("Listening for encrypted DNS block events...")
+
+	for {
+		record, err := rd.Read()
+		if err != nil {
+			if errors.Is(err, perf.ErrClosed) {
+				return
+			}
+			log.Printf("Error reading perf event: %v", err)
+			continue
+		}
+
+		if record.LostSamples > 0 {
+			log.Printf("Lost %d events", record.LostSamples)
+			continue
+		}
+
+		var event EncryptedDNSEvent
+		if len(record.RawSample) < 20 { // 6 + 4 + 4 + 4 = 18 bytes, padded to 20?
+			// Struct size: 6 (mac) + 2 (pad) + 4 (src) + 4 (dst) + 4 (proto) = 20 bytes
+			// Let's just check minimum size
+			if len(record.RawSample) < 18 {
+				continue
+			}
+		}
+
+		// Manual decoding
+		copy(event.MAC[:], record.RawSample[0:6])
+		// Padding 2 bytes
+		event.SrcIP = binary.LittleEndian.Uint32(record.RawSample[8:12])
+		event.DestIP = binary.LittleEndian.Uint32(record.RawSample[12:16])
+		event.Protocol = binary.LittleEndian.Uint32(record.RawSample[16:20])
+
+		macStr := macToString(event.MAC[:])
+		destIP := intToIP(event.DestIP).String()
+
+		var protocol string
+		switch event.Protocol {
+		case 0:
+			protocol = "DoT"
+		case 1:
+			protocol = "DoH"
+		case 2:
+			protocol = "DoQ"
+		default:
+			protocol = "Unknown"
+		}
+
+		// Look up user info
+		// We can query the DB for the user associated with this MAC
+		// For efficiency, we could cache this, but for now let's query DB
+		var userID *int
+		var userName string
+		var deviceName string
+
+		// Get device info from DB
+		// We need a function in db package to get device info by MAC
+		// Let's assume we can query user_devices table
+
+		// Since we don't have a direct function, let's query here or add one.
+		// Adding a helper in db package is better.
+		// But for now, let's just log it without user info if we can't easily get it,
+		// or use a simple query.
+
+		// Actually, let's add a helper in db package: GetDeviceOwner(mac string)
+		// I'll add it to webserver/db/devices.go if it exists, or just use raw query here?
+		// No, main.go uses db package.
+
+		// Let's try to get user info
+		uID, uName, dName, err := db.GetDeviceOwner(macStr)
+		if err == nil {
+			userID = uID
+			userName = uName
+			deviceName = dName
+		} else {
+			deviceName = "Unknown Device"
+		}
+
+		log.Printf("Blocked %s from %s (%s) to %s", protocol, macStr, deviceName, destIP)
+
+		if err := db.LogBlockedEncryptedDNS(macStr, deviceName, userID, userName, destIP, protocol); err != nil {
+			log.Printf("Failed to log blocked encrypted DNS: %v", err)
+		}
+	}
+}
+
+// intToIP converts uint32 to net.IP
+func intToIP(ipInt uint32) net.IP {
+	ip := make(net.IP, 4)
+	binary.LittleEndian.PutUint32(ip, ipInt)
+	return ip
+}
+
+// getInterfaceIP returns the IPv4 address of the interface as uint32 (Little Endian)
+func getInterfaceIP(ifaceName string) (uint32, error) {
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return 0, err
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return 0, err
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				ip := ipnet.IP.To4()
+				return binary.LittleEndian.Uint32(ip), nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("no IPv4 address found")
 }

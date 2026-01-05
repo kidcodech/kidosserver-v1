@@ -151,6 +151,7 @@ function App() {
   const [blockedDomains, setBlockedDomains] = useState([])
   const [newDomain, setNewDomain] = useState('')
   const [blockedLogs, setBlockedLogs] = useState([])
+  const [encryptedDNSLogs, setEncryptedDNSLogs] = useState([])
   // Default to today's date in local time
   const [logFilterDate, setLogFilterDate] = useState(() => {
     const now = new Date()
@@ -386,6 +387,8 @@ function App() {
         fetchBlockedLogs()
       } else if (logsSubTab === 'dns') {
         fetchDNSRequests()
+      } else if (logsSubTab === 'encrypted') {
+        fetchEncryptedDNSLogs()
       }
     }
   }, [activeTab, logsSubTab, logFilterDate, logFilterType, logFilterValue])
@@ -874,6 +877,18 @@ function App() {
     }
   }
 
+  const fetchEncryptedDNSLogs = async () => {
+    try {
+      const response = await fetch('/api/logs/encrypted-dns')
+      if (response.ok) {
+        const data = await response.json()
+        setEncryptedDNSLogs(data)
+      }
+    } catch (error) {
+      console.error('Error fetching encrypted DNS logs:', error)
+    }
+  }
+
   return (
     <div className="App">
       <aside className="sidebar">
@@ -1073,6 +1088,12 @@ function App() {
                 onClick={() => setLogsSubTab('blocked')}
               >
                 🚫 Blocked Domains
+              </button>
+              <button 
+                className={`user-tab ${logsSubTab === 'encrypted' ? 'active' : ''}`}
+                onClick={() => setLogsSubTab('encrypted')}
+              >
+                🔒 Encrypted DNS
               </button>
               <button 
                 className={`user-tab ${logsSubTab === 'dns' ? 'active' : ''}`}
@@ -1308,6 +1329,53 @@ function App() {
                           <td>{log.device_name || 'Unnamed'}</td>
                           <td>{log.device_mac}</td>
                           <td>{log.ip_address || 'N/A'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {logsSubTab === 'encrypted' && (
+            <>
+              <div className="controls">
+                <div style={{display: 'flex', gap: '10px', marginLeft: 'auto'}}>
+                  <button onClick={fetchEncryptedDNSLogs} className="btn btn-primary">
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div className="packet-table-container">
+                <table className="packet-table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>DNS Server IP</th>
+                      <th>Type</th>
+                      <th>User</th>
+                      <th>Device</th>
+                      <th>MAC Address</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {encryptedDNSLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan="6" className="no-data">No encrypted DNS blocks captured yet</td>
+                      </tr>
+                    ) : (
+                      encryptedDNSLogs.map((log, idx) => (
+                        <tr key={idx}>
+                          <td>{new Date(log.blocked_at).toLocaleString()}</td>
+                          <td className="domain-name">{log.dns_server_ip}</td>
+                          <td>
+                            <span className="protocol protocol-tcp">{log.protocol}</span>
+                          </td>
+                          <td>{log.user_name || '-'}</td>
+                          <td>{log.device_name || '-'}</td>
+                          <td className="ip-address">{log.device_mac}</td>
                         </tr>
                       ))
                     )}
@@ -1862,3 +1930,4 @@ function App() {
 }
 
 export default App
+
