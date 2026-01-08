@@ -47,15 +47,16 @@ type DeviceInfo struct {
 }
 
 var (
-	dnsRequests        []DNSRequest
-	dnsMutex           sync.RWMutex
-	userBlockedDomains map[int]map[string]bool // userID -> domain -> blocked
-	userMACMap         map[string]int          // macAddress -> userID
-	deviceInfoMap      map[string]DeviceInfo   // macAddress -> DeviceInfo
-	blockingMutex      sync.RWMutex
-	captivePortalIP    string
-	kidosIP            string // IP address for kidos domain, loaded from config
-	domainSyncInterval = 10 * time.Second
+	dnsRequests          []DNSRequest
+	dnsMutex             sync.RWMutex
+	userBlockedDomains   map[int]map[string]bool // userID -> domain -> blocked
+	userBlockingEnabled  map[int]bool            // userID -> enable_blocking
+	userMACMap           map[string]int          // macAddress -> userID
+	deviceInfoMap        map[string]DeviceInfo   // macAddress -> DeviceInfo
+	blockingMutex        sync.RWMutex
+	captivePortalIP      string
+	kidosIP              string // IP address for kidos domain, loaded from config
+	domainSyncInterval   = 10 * time.Second
 )
 
 func loadKidosIP() {
@@ -89,6 +90,18 @@ func syncBlockedDomainsFromDB() {
 	if err != nil {
 		log.Printf("Error loading blocked domains from database: %v", err)
 		return
+	}
+
+	// Load per-user enable_blocking settings
+	users, err := db.GetAllUsers()
+	if err != nil {
+		log.Printf("Error loading users: %v", err)
+		return
+	}
+
+	blockingEnabled := make(map[int]bool)
+	for _, user := range users {
+		blockingEnabled[user.ID] = user.EnableBlocking
 	}
 
 	// Get MAC to user mapping with device info
@@ -134,6 +147,7 @@ func syncBlockedDomainsFromDB() {
 	// Update global maps
 	blockingMutex.Lock()
 	userBlockedDomains = blockedMap
+	userBlockingEnabled = blockingEnabled
 	userMACMap = macMap
 	deviceInfoMap = devMap
 	blockingMutex.Unlock()
@@ -710,6 +724,12 @@ func checkAndParseDNS(data []byte) (bool, string, string, string, string) {
 	if !exists {
 		log.Printf("Unregistered device detected: %s - redirecting to captive portal", srcMAC)
 		return true, domain, srcMAC, srcIP, queryType // Unknown MAC, redirect to captive portal
+	}
+
+	// Check if domain blocking is enabled for this user
+	if blockingEnabled, ok := userBlockingEnabled[userID]; !ok || !blockingEnabled {
+		log.Printf("Domain blocking is disabled for user %d - allowing %s", userID, domain)
+		return false, domain, srcMAC, srcIP, queryType
 	}
 
 	// Get blocked domains for this user

@@ -10,11 +10,12 @@ import (
 
 // User represents a family member being monitored
 type User struct {
-	ID          int       `json:"id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             int       `json:"id"`
+	Username       string    `json:"username"`
+	DisplayName    string    `json:"display_name"`
+	EnableBlocking bool      `json:"enable_blocking"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // UserDevice represents a MAC address assigned to a user
@@ -53,7 +54,7 @@ type UserWithDevices struct {
 
 // GetAllUsers returns all users with their device MAC addresses
 func GetAllUsers() ([]UserWithDevices, error) {
-	rows, err := DB.Query("SELECT id, username, display_name, created_at, updated_at FROM users ORDER BY username")
+	rows, err := DB.Query("SELECT id, username, display_name, enable_blocking, created_at, updated_at FROM users ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +63,7 @@ func GetAllUsers() ([]UserWithDevices, error) {
 	var users []UserWithDevices
 	for rows.Next() {
 		var u UserWithDevices
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 
@@ -81,9 +82,9 @@ func GetAllUsers() ([]UserWithDevices, error) {
 func GetUserWithDevices(id int) (*UserWithDevices, error) {
 	var u UserWithDevices
 	err := DB.QueryRow(
-		"SELECT id, username, display_name, created_at, updated_at FROM users WHERE id = ?",
+		"SELECT id, username, display_name, enable_blocking, created_at, updated_at FROM users WHERE id = ?",
 		id,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.CreatedAt, &u.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -125,9 +126,9 @@ func CreateUser(username, displayName, password string) (*User, error) {
 func GetUser(id int) (*User, error) {
 	var u User
 	err := DB.QueryRow(
-		"SELECT id, username, display_name, created_at, updated_at FROM users WHERE id = ?",
+		"SELECT id, username, display_name, enable_blocking, created_at, updated_at FROM users WHERE id = ?",
 		id,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.CreatedAt, &u.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -154,6 +155,15 @@ func UpdateUser(id int, username, displayName string, password *string) error {
 	_, err := DB.Exec(
 		"UPDATE users SET username = ?, display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 		username, displayName, id,
+	)
+	return err
+}
+
+// UpdateUserBlocking toggles the enable_blocking flag for a user
+func UpdateUserBlocking(userID int, enableBlocking bool) error {
+	_, err := DB.Exec(
+		"UPDATE users SET enable_blocking = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		enableBlocking, userID,
 	)
 	return err
 }
@@ -245,9 +255,9 @@ func AuthenticateUser(username, password string) (*User, error) {
 	var passwordHash string
 
 	err := DB.QueryRow(
-		"SELECT id, username, password_hash, display_name, created_at, updated_at FROM users WHERE username = ?",
+		"SELECT id, username, password_hash, display_name, enable_blocking, created_at, updated_at FROM users WHERE username = ?",
 		username,
-	).Scan(&u.ID, &u.Username, &passwordHash, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &passwordHash, &u.DisplayName, &u.EnableBlocking, &u.CreatedAt, &u.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, err // User not found

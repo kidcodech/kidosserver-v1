@@ -1660,64 +1660,102 @@ function App() {
 
                   {/* Blocked Domains Management */}
                   <div className="user-section">
-                    <h3>🚫 Blocked Domains</h3>
-                    <div className="controls" style={{marginBottom: '1rem'}}>
-                      <div className="add-domain-form">
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
+                      <h3>🚫 Blocked Domains</h3>
+                      <label className="switch">
                         <input 
-                          type="text" 
-                          value={newUserDomain}
-                          onChange={(e) => setNewUserDomain(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && addUserDomain()}
-                          placeholder="Enter domain to block for this user"
-                          className="domain-input"
+                          type="checkbox" 
+                          checked={selectedUser.enable_blocking}
+                          onChange={async () => {
+                            try {
+                              const res = await fetch(`/api/users/${selectedUser.id}/blocking`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ enable_blocking: !selectedUser.enable_blocking })
+                              })
+                              if (res.ok) {
+                                // Fetch the full user with devices
+                                await fetchUsers()
+                                const userRes = await fetch(`/api/users/${selectedUser.id}`)
+                                if (userRes.ok) {
+                                  const fullUser = await userRes.json()
+                                  setSelectedUser(fullUser)
+                                }
+                              }
+                            } catch (error) {
+                              console.error('Error toggling blocking:', error)
+                            }
+                          }}
                         />
-                        <button onClick={addUserDomain} className="btn btn-success">
-                          ➕ Add Domain
-                        </button>
-                      </div>
-                      <button onClick={() => fetchUserBlockedDomains(selectedUser.id)} className="btn btn-primary">
-                        🔄 Refresh
-                      </button>
+                        <span className="slider round"></span>
+                      </label>
                     </div>
+                    <p className="setting-description" style={{marginBottom: '1rem'}}>
+                      Enable or disable domain blocking for this user. When disabled, their blocked domain list is preserved but not enforced.
+                      {selectedUser.enable_blocking ? <span style={{color: '#27ae60', fontWeight: 'bold', marginLeft: '0.5rem'}}>Currently Enabled</span> : <span style={{color: '#e74c3c', fontWeight: 'bold', marginLeft: '0.5rem'}}>Currently Disabled</span>}
+                    </p>
 
-                    <div className="stats-summary">
-                      <div className="stat-card">
-                        <h3>Total Blocked Domains</h3>
-                        <p className="stat-value">{userBlockedDomains.length}</p>
+                    {selectedUser.enable_blocking && (
+                      <>
+                        <div className="controls" style={{marginBottom: '1rem'}}>
+                          <div className="add-domain-form">
+                            <input 
+                              type="text" 
+                              value={newUserDomain}
+                              onChange={(e) => setNewUserDomain(e.target.value)}
+                              onKeyPress={(e) => e.key === 'Enter' && addUserDomain()}
+                              placeholder="Enter domain to block for this user"
+                              className="domain-input"
+                            />
+                            <button onClick={addUserDomain} className="btn btn-success">
+                              ➕ Add Domain
+                            </button>
+                          </div>
+                          <button onClick={() => fetchUserBlockedDomains(selectedUser.id)} className="btn btn-primary">
+                            🔄 Refresh
+                          </button>
+                        </div>
+
+                        <div className="stats-summary">
+                          <div className="stat-card">
+                            <h3>Total Blocked Domains</h3>
+                            <p className="stat-value">{userBlockedDomains.length}</p>
+                          </div>
+                        </div>
+
+                        <div className="packet-table-container">
+                          <table className="packet-table user-blocked-table">
+                            <thead>
+                              <tr>
+                                <th style={{width: '80%'}}>Domain</th>
+                                <th style={{width: '20%'}}>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {userBlockedDomains.length === 0 ? (
+                                <tr>
+                                  <td colSpan="2" className="no-data">No domains blocked for this user</td>
+                                </tr>
+                              ) : (
+                                userBlockedDomains.map((item) => (
+                                <tr key={item.id}>
+                                  <td className="domain-name">{item.domain}</td>
+                                  <td>
+                                    <button 
+                                      onClick={() => unblockDomainForUser(selectedUser.id, item.id)} 
+                                      className="btn btn-small btn-primary"
+                                    >
+                                      ✅ Unblock
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
                       </div>
-                    </div>
-
-                    <div className="packet-table-container">
-                      <table className="packet-table user-blocked-table">
-                        <thead>
-                          <tr>
-                            <th style={{width: '80%'}}>Domain</th>
-                            <th style={{width: '20%'}}>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {userBlockedDomains.length === 0 ? (
-                            <tr>
-                              <td colSpan="2" className="no-data">No domains blocked for this user</td>
-                            </tr>
-                          ) : (
-                            userBlockedDomains.map((item) => (
-                            <tr key={item.id}>
-                              <td className="domain-name">{item.domain}</td>
-                              <td>
-                                <button 
-                                  onClick={() => unblockDomainForUser(selectedUser.id, item.id)} 
-                                  className="btn btn-small btn-primary"
-                                >
-                                  ✅ Unblock
-                                </button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                    </>
+                  )}
                 </div>
               </>
             ) : (

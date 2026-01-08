@@ -151,6 +151,9 @@ func runMigrations() error {
 	// Migration: Add device_ip column to blocked_encrypted_dns_logs if it doesn't exist
 	DB.Exec("ALTER TABLE blocked_encrypted_dns_logs ADD COLUMN device_ip TEXT")
 
+	// Migration: Add enable_blocking column to users if it doesn't exist
+	DB.Exec("ALTER TABLE users ADD COLUMN enable_blocking BOOLEAN DEFAULT 1")
+
 	// Seed Data - System Settings
 	DB.Exec("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_dot', 'true')")
 	DB.Exec("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('block_doq', 'true')")

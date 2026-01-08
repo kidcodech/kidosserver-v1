@@ -109,6 +109,7 @@ func main() {
 	router.HandleFunc("/api/users/{id}", getUser).Methods("GET")
 	router.HandleFunc("/api/users/{id}", updateUser).Methods("PUT")
 	router.HandleFunc("/api/users/{id}", deleteUser).Methods("DELETE")
+	router.HandleFunc("/api/users/{id}/blocking", toggleUserBlocking).Methods("PUT")
 	router.HandleFunc("/api/users/{id}/devices", getUserDevices).Methods("GET")
 	router.HandleFunc("/api/users/{id}/devices", addUserDevice).Methods("POST")
 	router.HandleFunc("/api/users/{id}/devices/{device_id}", updateUserDevice).Methods("PUT")
@@ -1123,6 +1124,33 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// toggleUserBlocking toggles the enable_blocking flag for a user
+func toggleUserBlocking(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		EnableBlocking bool `json:"enable_blocking"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.UpdateUserBlocking(id, req.EnableBlocking); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update blocking: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	user, _ := db.GetUser(id)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
 }
 
 // getUserDevices returns all MAC addresses for a user
