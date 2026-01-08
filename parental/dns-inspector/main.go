@@ -47,16 +47,16 @@ type DeviceInfo struct {
 }
 
 var (
-	dnsRequests          []DNSRequest
-	dnsMutex             sync.RWMutex
-	userBlockedDomains   map[int]map[string]bool // userID -> domain -> blocked
-	userBlockingEnabled  map[int]bool            // userID -> enable_blocking
-	userMACMap           map[string]int          // macAddress -> userID
-	deviceInfoMap        map[string]DeviceInfo   // macAddress -> DeviceInfo
-	blockingMutex        sync.RWMutex
-	captivePortalIP      string
-	kidosIP              string // IP address for kidos domain, loaded from config
-	domainSyncInterval   = 10 * time.Second
+	dnsRequests         []DNSRequest
+	dnsMutex            sync.RWMutex
+	userBlockedDomains  map[int]map[string]bool // userID -> domain -> blocked
+	userBlockingEnabled map[int]bool            // userID -> enable_blocking
+	userMACMap          map[string]int          // macAddress -> userID
+	deviceInfoMap       map[string]DeviceInfo   // macAddress -> DeviceInfo
+	blockingMutex       sync.RWMutex
+	captivePortalIP     string
+	kidosIP             string // IP address for kidos domain, loaded from config
+	domainSyncInterval  = 10 * time.Second
 )
 
 func loadKidosIP() {
