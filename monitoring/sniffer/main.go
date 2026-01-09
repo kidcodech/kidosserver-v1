@@ -175,9 +175,10 @@ func parseDNS(packet gopacket.Packet) {
 			ip := net.IP(answer.IP).String()
 
 			// Don't map forged DNS responses from captive portal
-			// Blocked domains resolve to 192.168.1.x (captive portal IPs)
-			if strings.HasPrefix(ip, "192.168.1.") {
-				log.Printf("DNS: %s -> %s (captive portal - not mapping)", domainName, ip)
+			// Blocked domains resolve to private IPs (captive portal)
+			parsedIP := net.ParseIP(ip)
+			if parsedIP != nil && (parsedIP.IsPrivate() || parsedIP.IsLoopback()) {
+				log.Printf("DNS: %s -> %s (captive portal/private - not mapping)", domainName, ip)
 				continue
 			}
 
@@ -188,8 +189,9 @@ func parseDNS(packet gopacket.Packet) {
 			ip := net.IP(answer.IP).String()
 
 			// Don't map forged DNS responses from captive portal
-			if strings.HasPrefix(ip, "192.168.1.") {
-				log.Printf("DNS: %s -> %s (captive portal - not mapping)", domainName, ip)
+			parsedIP := net.ParseIP(ip)
+			if parsedIP != nil && (parsedIP.IsPrivate() || parsedIP.IsLoopback()) {
+				log.Printf("DNS: %s -> %s (captive portal/private - not mapping)", domainName, ip)
 				continue
 			}
 

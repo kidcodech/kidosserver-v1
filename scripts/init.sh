@@ -102,10 +102,18 @@ ip netns exec switchns ip link set br-switch up
 ip netns exec appsns ip link set veth-app up
 ip netns exec appsns2 ip link set veth-app up
 
-# Configure switchns bridge IP
-echo "Configuring IP for switch bridge..."
-ip netns exec switchns ip addr add 192.168.1.100/24 dev br-switch
-ip netns exec switchns ip route add default via 192.168.1.1
+# Configure switchns bridge IP via DHCP
+echo "Configuring IP for switch bridge via DHCP..."
+ip netns exec switchns pkill dhclient 2>/dev/null || true
+sleep 1
+ip netns exec switchns dhclient br-switch
+sleep 2
+BR_SWITCH_IP=$(ip netns exec switchns ip -4 addr show br-switch | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+if [ -n "$BR_SWITCH_IP" ]; then
+    echo "✓ Got IP via DHCP for br-switch: $BR_SWITCH_IP"
+else
+    echo "✗ Failed to get DHCP IP for br-switch"
+fi
 
 # Smart IP management: DHCP-then-static with fallback
 IP_CONFIG_FILE="/tmp/kidos-network.conf"
