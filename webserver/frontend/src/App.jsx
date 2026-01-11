@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useMediaQuery } from 'react-responsive'
 import './App.css'
 import UserManagement from './components/UserManagement'
 
@@ -146,6 +147,8 @@ function TrafficGraph({ data, onWidthChange }) {
 }
 
 function App() {
+  const isMobile = useMediaQuery({ query: '(max-width: 768px)' })
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [packets, setPackets] = useState([])
   const [dnsRequests, setDnsRequests] = useState([])
   const [blockedDomains, setBlockedDomains] = useState([])
@@ -613,7 +616,10 @@ function App() {
     }
   }
 
-  const unblockDomainForUser = async (userId, domainId) => {
+  const unblockDomainForUser = async (userId, domainId, domainName) => {
+    if (!window.confirm(`Are you sure you want to unblock "${domainName}"?`)) {
+      return
+    }
     try {
       await fetch(`/api/users/${userId}/blocked-domains/${domainId}`, {
         method: 'DELETE'
@@ -677,6 +683,9 @@ function App() {
   }
 
   const removeUserMAC = async (userId, deviceId) => {
+    if (!window.confirm('Are you sure you want to remove this device from the user?')) {
+      return
+    }
     try {
       await fetch(`/api/users/${userId}/devices/${deviceId}`, {
         method: 'DELETE'
@@ -933,53 +942,62 @@ function App() {
               {ws && ws.readyState === WebSocket.OPEN ? '● Live' : '○ Offline'}
             </span>
           </div>
-          {clientIP && (
+          {!isMobile && clientIP && (
             <div className="client-info">
               <span className="client-ip">📍 {clientIP}</span>
               {userName && <span className="client-user">👤 {userName}</span>}
             </div>
           )}
+          {isMobile && (
+            <button 
+              className="mobile-menu-toggle"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              aria-label="Toggle menu"
+            >
+              {isMobileMenuOpen ? '✕' : '☰'}
+            </button>
+          )}
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className={`sidebar-nav ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
           <button 
             className={`nav-item ${activeTab === 'packets' ? 'active' : ''}`}
-            onClick={() => setActiveTab('packets')}
+            onClick={() => { setActiveTab('packets'); setIsMobileMenuOpen(false); }}
           >
             <span className="nav-icon">📊</span>
             <span className="nav-text">Packet Statistics</span>
           </button>
           <button 
             className={`nav-item ${activeTab === 'traffic' ? 'active' : ''}`}
-            onClick={() => setActiveTab('traffic')}
+            onClick={() => { setActiveTab('traffic'); setIsMobileMenuOpen(false); }}
           >
             <span className="nav-icon">📈</span>
             <span className="nav-text">Traffic Monitor</span>
           </button>
           <button 
             className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('logs')}
+            onClick={() => { setActiveTab('logs'); setIsMobileMenuOpen(false); }}
           >
             <span className="nav-icon">📋</span>
             <span className="nav-text">Logs</span>
           </button>
           <button 
             className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
-            onClick={() => setActiveTab('users')}
+            onClick={() => { setActiveTab('users'); setIsMobileMenuOpen(false); }}
           >
             <span className="nav-icon">👥</span>
             <span className="nav-text">Users</span>
           </button>
           <button 
             className={`nav-item ${activeTab === 'system' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('system'); fetchSystemHealth(); }}
+            onClick={() => { setActiveTab('system'); fetchSystemHealth(); setIsMobileMenuOpen(false); }}
           >
             <span className="nav-icon">⚙️</span>
             <span className="nav-text">System Health</span>
           </button>
           <button 
             className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('settings'); fetchSystemSettings(); }}
+            onClick={() => { setActiveTab('settings'); fetchSystemSettings(); setIsMobileMenuOpen(false); }}
           >
             <span className="nav-icon">🔧</span>
             <span className="nav-text">Settings</span>
@@ -1593,63 +1611,72 @@ function App() {
                     <div className="ip-list">
                       {selectedUser.devices && selectedUser.devices.length > 0 ? (
                         selectedUser.devices.map((device) => (
-                          <div key={device.id} className="ip-item" style={{display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'nowrap', marginBottom: '0.75rem', padding: '0.5rem'}}>
-                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem', flex: 1, minWidth: 0}}>
-                              <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#f59e0b', whiteSpace: 'nowrap'}}>{device.mac_address}</span>
-                              {device.ip_address && (
-                                <span className="ip-address" style={{fontFamily: 'Courier New, monospace', color: '#888', fontSize: '0.9rem', whiteSpace: 'nowrap'}}>({device.ip_address})</span>
-                              )}
-                              {editingDeviceName === device.id ? (
-                                <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 1}}>
-                                  <input 
-                                    type="text"
-                                    value={editDeviceNameValue}
-                                    onChange={(e) => setEditDeviceNameValue(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && updateDeviceName(device.id, editDeviceNameValue)}
-                                    placeholder="Device name"
-                                    className="domain-input"
-                                    style={{flex: 1, padding: '0.5rem', fontSize: '0.9rem', minWidth: '150px'}}
-                                    autoFocus
-                                  />
-                                  <button 
-                                    onClick={() => updateDeviceName(device.id, editDeviceNameValue)}
-                                    className="btn btn-small btn-success"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button 
-                                    onClick={() => { setEditingDeviceName(null); setEditDeviceNameValue(''); }}
-                                    className="btn btn-small btn-danger"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <>
-                                  <span style={{color: '#9ca3af', fontSize: '0.9rem', whiteSpace: 'nowrap'}}>
-                                    {device.device_name || 'Unnamed device'}
-                                  </span>
-                                  <button 
-                                    onClick={() => { 
-                                      setEditingDeviceName(device.id); 
-                                      setEditDeviceNameValue(device.device_name || ''); 
-                                    }}
-                                    className="btn btn-small btn-primary"
-                                    style={{padding: '0.25rem 0.5rem', fontSize: '0.75rem', whiteSpace: 'nowrap'}}
-                                  >
-                                    ✏️ Edit
-                                  </button>
-                                </>
-                              )}
+                          <div key={device.id} className="ip-item device-item">
+                            <div className="device-content">
+                              <div className="device-main-info">
+                                <span className="ip-address mac-address">{device.mac_address}</span>
+                                {device.ip_address && (
+                                  <span className="ip-address ip-addr">({device.ip_address})</span>
+                                )}
+                              </div>
+                              
+                              <div className="device-name-container">
+                                {editingDeviceName === device.id ? (
+                                  <div className="device-edit-form">
+                                    <input 
+                                      type="text"
+                                      value={editDeviceNameValue}
+                                      onChange={(e) => setEditDeviceNameValue(e.target.value)}
+                                      onKeyPress={(e) => e.key === 'Enter' && updateDeviceName(device.id, editDeviceNameValue)}
+                                      placeholder="Device name"
+                                      className="domain-input device-name-input"
+                                      autoFocus
+                                    />
+                                    <div className="device-edit-actions">
+                                      <button 
+                                        onClick={() => updateDeviceName(device.id, editDeviceNameValue)}
+                                        className="btn btn-small btn-success"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button 
+                                        onClick={() => { setEditingDeviceName(null); setEditDeviceNameValue(''); }}
+                                        className="btn btn-small btn-danger"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="device-name-display">
+                                    <span className="device-name-text">
+                                      {device.device_name || 'Unnamed device'}
+                                    </span>
+                                    <button 
+                                      onClick={() => { 
+                                        setEditingDeviceName(device.id); 
+                                        setEditDeviceNameValue(device.device_name || ''); 
+                                      }}
+                                      className="btn btn-small btn-primary edit-btn"
+                                    >
+                                      ✏️
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <span className="ip-date" style={{whiteSpace: 'nowrap', marginRight: '1rem', color: '#9ca3af'}}>Added: {new Date(device.created_at).toLocaleDateString()}</span>
-                            <button 
-                              onClick={() => removeUserMAC(selectedUser.id, device.id)} 
-                              className="btn btn-small btn-danger"
-                              style={{flexShrink: 0}}
-                            >
-                              🗑️
-                            </button>
+
+                            <div className="device-meta">
+                              <span className="ip-date">
+                                Added: {new Date(device.created_at).toLocaleDateString()}
+                              </span>
+                              <button 
+                                onClick={() => removeUserMAC(selectedUser.id, device.id)} 
+                                className="btn btn-small btn-danger delete-btn"
+                              >
+                                🗑️
+                              </button>
+                            </div>
                           </div>
                         ))
                       ) : (
@@ -1697,7 +1724,7 @@ function App() {
 
                     {selectedUser.enable_blocking && (
                       <>
-                        <div className="controls" style={{marginBottom: '1rem'}}>
+                        <div className="controls domain-controls-container" style={{marginBottom: '1rem'}}>
                           <div className="add-domain-form">
                             <input 
                               type="text" 
@@ -1708,12 +1735,13 @@ function App() {
                               className="domain-input"
                             />
                             <button onClick={addUserDomain} className="btn btn-success">
-                              ➕ Add Domain
+                              ➕ Add
+                            </button>
+                            <button onClick={() => fetchUserBlockedDomains(selectedUser.id)} className="btn btn-primary refresh-btn-mobile">
+                              <span className="refresh-icon">🔄</span>
+                              <span className="refresh-text">Refresh</span>
                             </button>
                           </div>
-                          <button onClick={() => fetchUserBlockedDomains(selectedUser.id)} className="btn btn-primary">
-                            🔄 Refresh
-                          </button>
                         </div>
 
                         <div className="stats-summary">
@@ -1727,8 +1755,8 @@ function App() {
                           <table className="packet-table user-blocked-table">
                             <thead>
                               <tr>
-                                <th style={{width: '80%'}}>Domain</th>
-                                <th style={{width: '20%'}}>Action</th>
+                                <th className="col-domain">Domain</th>
+                                <th className="col-action">Action</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1742,7 +1770,7 @@ function App() {
                                   <td className="domain-name">{item.domain}</td>
                                   <td>
                                     <button 
-                                      onClick={() => unblockDomainForUser(selectedUser.id, item.id)} 
+                                      onClick={() => unblockDomainForUser(selectedUser.id, item.id, item.domain)} 
                                       className="btn btn-small btn-primary"
                                     >
                                       ✅ Unblock

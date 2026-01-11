@@ -551,14 +551,16 @@ body {
 
 .user-blocked-table th:nth-child(1),
 .user-blocked-table td:nth-child(1) {
-  flex: 0 0 80%;
+  flex: 0 0 auto;
   min-width: 200px;
+  max-width: 70%;
 }
 
 .user-blocked-table th:nth-child(2),
 .user-blocked-table td:nth-child(2) {
-  flex: 0 0 20%;
+  flex: 1;
   min-width: 100px;
+  text-align: right;
 }
 
 .packet-table tbody tr:hover {
@@ -996,9 +998,267 @@ input:checked + .slider:before {
   border-radius: 4px;
 }
 
-.doh-list::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 4px;
+/* Responsive Design for Mobile Devices */
+@media (max-width: 768px) {
+  .App {
+    flex-direction: column;
+  }
+
+  /* Sidebar transforms into a collateral top navigation bar */
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: sticky; /* Keep it visible at top */
+    top: 0;
+    z-index: 1000;
+    flex-direction: column;
+    padding: 0;
+    order: -1;
+    background: #1a1a2e;
+    border-bottom: 1px solid #2a2a3e;
+    border-right: none;
+  }
+
+  .sidebar-header {
+    padding: 0.5rem 0.75rem;
+    border-bottom: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    background: #1a1a2e; /* Ensure opacity */
+    z-index: 1001;
+  }
+
+  .mobile-menu-toggle {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+    font-size: 1.25rem;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+  }
+
+  .sidebar-header h1 {
+    font-size: 1.25rem;
+    margin-bottom: 0;
+  }
+
+  .sidebar-nav {
+    display: none;
+    flex-direction: column;
+    width: 100%;
+    background: #151525;
+    border-top: 1px solid #2a2a3e;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .sidebar-nav.mobile-open {
+    display: flex;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+  }
+
+  .nav-item {
+    flex-direction: row;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    gap: 0.75rem;
+    border-left: 4px solid transparent;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    text-align: left;
+    justify-content: flex-start;
+  }
+
+  .nav-item.active {
+    border-left: 4px solid #646cff; /* Left border again for mobile list */
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    background: rgba(100, 108, 255, 0.1);
+  }
+  
+  .nav-item.active::before {
+    display: none;
+  }
+
+  .nav-icon {
+    font-size: 1.25rem;
+    margin-bottom: 0;
+    width: 24px;
+    text-align: center;
+  }
+
+  .nav-text {
+    display: block; /* Always show text in menu */
+    font-size: 1rem;
+    font-weight: 500;
+  }
+
+  .client-info {
+    display: none; /* Hide client info on mobile header to save space */
+  }
+
+  /* Main Content Adjustments */
+  .main-content {
+    margin-left: 0;
+    padding: 0.5rem;
+    width: 100%;
+    min-height: calc(100vh - 80px); /* approximte header height */
+  }
+
+  .stats-summary {
+    grid-template-columns: repeat(2, 1fr); /* 2 columns on mobile */
+    gap: 0.5rem;
+  }
+
+  .stat-card {
+    padding: 0.75rem;
+    text-align: center;
+  }
+
+  .stat-card h3 {
+    text-align: center;
+    display: block !important;
+    justify-content: center;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+    text-align: center;
+  }
+
+  /* Table responsiveness */
+  .packet-table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+    /* Removed border-right to fix black space issue */
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .packet-table {
+    min-width: 800px; /* Base min-width for tables (Packet table, etc.) */
+  }
+
+  /* Specific wider tables */
+  .dns-table, 
+  .packet-table:has(th:nth-child(7)) { /* Select tables with 7+ columns if :has supported, otherwise fallback to specific classes if added */
+    min-width: 1200px;
+  }
+  
+  /* Manual class targeting for React tables if :has isn't reliable in target browsers (Safari < 15.4) */
+  .packet-table.dns-table {
+    min-width: 1200px;
+  }
+
+  /* User blocked table should not be wide on mobile */
+  .packet-table.user-blocked-table {
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* Filter Inputs stack */
+  .log-filters,
+  .add-domain-form {
+    flex-direction: column;
+  }
+  
+  .filter-input, .domain-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .add-domain-form button {
+    width: 100%;
+  }
+
+  /* User Management Layout for Mobile */
+  .users-layout {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .users-list {
+    flex: none;
+    width: 100%;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .user-blocked-domains {
+    flex: none;
+    height: auto;
+    min-height: 400px;
+  }
+  
+  /* Modal adjustments */
+  .modal-content {
+    width: 95%;
+    padding: 1rem;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .form-actions {
+    flex-direction: column-reverse;
+  }
+  
+  .form-actions button {
+    width: 100%;
+  }
+
+  /* Settings adjustments */
+  .settings-section {
+    padding: 0.5rem;
+  }
+  
+  .setting-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  
+  .doh-item .ip-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+
+  /* User section padding reduction for mobile */
+  .user-section {
+    padding: 0.75rem;
+    border-radius: 6px;
+  }
+
+  .user-section h3 {
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+  }
+}
+
+/* Specific adjustments for very small screens (phones) */
+@media (max-width: 480px) {
+  .sidebar-header h1 {
+    font-size: 1rem;
+  }
+  
+  .nav-item {
+    min-width: 50px;
+  }
+  
+  .stats-summary {
+    grid-template-columns: 1fr; /* Stack cards on very small screens */
+  }
+  
+  .packet-table th, .packet-table td {
+    padding: 0.5rem;
+    font-size: 0.8rem;
+  }
 }
 
 .doh-list::-webkit-scrollbar-thumb:hover {
@@ -1009,4 +1269,352 @@ input:checked + .slider:before {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* Device List Styling */
+.device-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+}
+
+.device-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.device-main-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mac-address {
+  font-family: 'Courier New', monospace;
+  color: #f59e0b;
+  white-space: nowrap;
+}
+
+.ip-addr {
+  font-family: 'Courier New', monospace;
+  color: #888;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.device-name-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.device-name-display {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.device-name-text {
+  color: #9ca3af;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-edit-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.device-name-input {
+  flex: 1;
+  padding: 0.5rem; 
+  font-size: 0.9rem;
+  min-width: 100px;
+}
+
+.device-edit-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.edit-btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.device-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.ip-date {
+  white-space: nowrap;
+  color: #9ca3af;
+  font-size: 0.85rem;
+}
+
+.delete-btn {
+  flex-shrink: 0;
+}
+
+/* Mobile Overrides for Device List */
+@media (max-width: 768px) {
+  .device-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .device-content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .device-main-info {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .device-name-container {
+    width: 100%;
+  }
+  
+  .device-name-display {
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .device-name-text {
+    white-space: normal;
+  }
+
+  .device-meta {
+    width: 100%;
+    justify-content: space-between;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding-top: 0.5rem;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Combine Add and Refresh into a row under the input */
+  .add-domain-form {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  
+  .domain-input {
+    width: 100%;
+    order: 1;
+  }
+  
+  /* Make buttons equal width to fit text */
+  .add-domain-form .btn-success {
+    order: 2;
+    flex: 1; 
+  }
+
+  .refresh-btn-mobile {
+    order: 3;
+    flex: 1;
+    min-width: 50px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem; /* Space between icon and text */
+  }
+
+  .domain-controls-container .controls {
+    flex-direction: column;
+  }
+}
+
+@media (min-width: 769px) {
+  /* Show text and icon on desktop */
+  .refresh-btn-mobile {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Specific styling for user blocked domains table on mobile */
+  .user-blocked-table th, 
+  .user-blocked-table td {
+    padding: 0.75rem 0.5rem;
+  }
+  
+  .user-blocked-table .domain-name {
+    word-break: break-all; /* Allow long domains to wrap */
+    max-width: 150px;
+  }
+  
+  /* Make "Unblock" button icon-only on very small screens if needed */
+  .user-blocked-table .btn-small {
+     white-space: nowrap;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Fix container width */
+  .packet-table-container {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    overflow-x: hidden; /* No scroll needed for flex/list view */
+  }
+
+  /* Option 1: Auto-Fit Table with Headers (Restored per request) */
+  .user-blocked-table {
+    display: table;
+    width: 100% !important;
+    table-layout: fixed; /* Crucial for text slicing */
+    border-collapse: collapse;
+  }
+
+  /* Restore Header */
+  .user-blocked-table thead {
+    display: table-header-group;
+  }
+
+  .user-blocked-table tbody {
+    display: table-row-group;
+  }
+
+  .user-blocked-table tr {
+    display: table-row;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  
+  .user-blocked-table td, 
+  .user-blocked-table th {
+    display: table-cell;
+    vertical-align: middle;
+    padding: 0.75rem 0.5rem !important;
+    border: none;
+  }
+
+  /* Domain Column: Takes available space */
+  .user-blocked-table .col-domain,
+  .user-blocked-table .domain-name {
+    width: auto;
+    max-width: 0; /* CRITICAL: Allows flex/grid/table truncation even when content is long */
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 10px;
+  }
+
+  /* Action Column: Shrinks to fit content */
+  .user-blocked-table .col-action,
+  .user-blocked-table td:last-child {
+    width: 1%; /* Trick to shrink column */
+    white-space: nowrap;
+    text-align: right;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Smaller button padding on mobile to ensure fit */
+  .user-blocked-table .btn-small {
+     padding: 0.25rem 0.5rem;
+     font-size: 0.8rem;
+  }
+}
+
+/* ====== GLOBAL TABLE RESET (Mobile Clean Start) ====== */
+
+@media (max-width: 768px) {
+  /* 1. Container Fixes */
+  .packet-table-container {
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      background: transparent;
+  }
+
+  /* 2. Generic Table Reset for Mobile */
+  .packet-table {
+      width: 100%;
+      min-width: 600px; /* Force scroll for complex tables like packets */
+      border-collapse: collapse;
+      table-layout: auto;
+  }
+  
+  .packet-table th, 
+  .packet-table td {
+      padding: 0.5rem 0.35rem;
+      font-size: 0.85rem;
+  }
+
+  /* 3. "Blocked Domains" / Simple List Table Styling */
+  /* This specific table should NOT scroll, but fit the screen */
+  .user-blocked-table {
+      min-width: 0 !important; /* Override the 600px generic constraint */
+      width: 100% !important;
+      table-layout: fixed !important; /* Force columns to respect width % */
+  }
+
+  /* Original background color for table rows */
+  .user-blocked-table tbody tr {
+      background: #1a1a1a;
+  }
+
+  .user-blocked-table tbody tr:hover {
+      background: #2a2a2a;
+  }
+
+  /* Domain Column (Left) */
+  .user-blocked-table th:first-child,
+  .user-blocked-table td:first-child {
+      width: auto; /* Take all remaining space */
+      min-width: 150px; /* Minimum width for domain column */
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 0; /* Magic fix for flex/table truncation */
+  }
+
+  /* Action Column (Right) */
+  .user-blocked-table th:last-child,
+  .user-blocked-table td:last-child {
+      width: 1%; /* Shrink wrap the button */
+      white-space: nowrap;
+      text-align: right;
+      padding-right: 0;
+  }
+
+  /* Button resizing for mobile touch targets */
+  .user-blocked-table .btn-small {
+      padding: 4px 8px;
+      font-size: 0.8rem;
+  }
+
+  /* FIX: Prevent scroll for user-blocked-table container specifically */
+  .packet-table-container:has(.user-blocked-table) {
+      overflow-x: hidden !important;
+  }
 }
