@@ -2,9 +2,11 @@
 
 set -x
 
-# Create Ethernet namespace
-echo "Creating Ethernet namespace (ethns)..."
-ip netns add ethns
+# Color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
 # Create Kidos namespace
 echo "Creating Kidos namespace (kidosns)..."
@@ -22,31 +24,121 @@ ip netns add appsns
 echo "Creating Apps namespace 2 (appsns2)..."
 ip netns add appsns2
 
-echo "All namespaces created successfully!"
+echo "Core namespaces created successfully!"
 
-# Move physical ethernet interface to ethernet namespace
-echo "Moving enp0s31f6 to ethernet namespace..."
-ip link set enp0s31f6 netns ethns
+# Discover all physical ethernet interfaces (exclude wireless, virtual, loopback)
+echo "Discovering physical ethernet interfaces..."
+ALL_ETH_INTERFACES=$(ip link show | grep -E '^[0-9]+: (en|eth)' | grep -v '@' | awk -F': ' '{print $2}' | awk '{print $1}')
 
-# Bring up the interface
-echo "Bringing up enp0s31f6..."
-ip netns exec ethns ip link set enp0s31f6 up
+if [ -z "$ALL_ETH_INTERFACES" ]; then
+    echo -e "${RED}✗ No physical ethernet interfaces found!${NC}"
+    exit 1
+fi
 
-# Create bridge in ethernet namespace
-echo "Creating bridge in ethernet namespace..."
-ip netns exec ethns ip link add name br0 type bridge
+echo "Found interfaces: $ALL_ETH_INTERFACES"
 
-# Add physical interface to bridge
-echo "Adding enp0s31f6 to bridge..."
-ip netns exec ethns ip link set enp0s31f6 master br0
+# Test each interface for internet connectivity
+INTERNET_IFACES=()
+NO_INTERNET_IFACES=()
 
-# Create veth pair to connect ethernet and kidos namespaces
-echo "Creating veth pair between ethernet and kidos namespaces..."
-ip netns exec ethns ip link add veth-eth type veth peer name veth-kidos netns kidosns
+for iface in $ALL_ETH_INTERFACES; do
+    echo "Testing connectivity on $iface..."
+    ip link set "$iface" up
+    sleep 2
+    
+    # Try to get DHCP and test connectivity
+    pkill -f "dhclient.*$iface" 2>/dev/null || true
+    timeout 10 dhclient "$iface" 2>/dev/null
+    
+    # Test with ping
+    if timeout 3 ping -c 1 -I "$iface" 8.8.8.8 >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ $iface has internet connectivity${NC}"
+        INTERNET_IFACES+=("$iface")
+    else
+        echo -e "${YELLOW}✗ $iface has no internet connectivity${NC}"
+        NO_INTERNET_IFACES+=("$iface")
+    fi
+    
+    # Release DHCP for now
+    pkill -f "dhclient.*$iface" 2>/dev/null || true
+    ip addr flush dev "$iface"
+done
 
-# Add veth-eth to bridge
-echo "Adding veth-eth to bridge..."
-ip netns exec ethns ip link set veth-eth master br0
+# Setup based on connectivity results
+if [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
+    echo "Setting up ethns namespace with internet-connected interfaces..."
+    ip netns add ethns
+    
+    # Create bridge in ethernet namespace
+    ip netns exec ethns ip link add name br0 type bridge
+    
+    # Move all internet-connected interfaces to ethns
+    for iface in "${INTERNET_IFACES[@]}"; do
+        echo "Moving $iface to ethns namespace..."
+        ip link set "$iface" netns ethns
+        ip netns exec ethns ip link set "$iface" up
+        ip netns exec ethns ip link set "$iface" master br0
+        echo -e "${GREEN}✓ $iface added to ethns bridge${NC}"
+    done
+    
+    # Bring up bridge
+    ip netns exec ethns ip link set br0 up
+
+    # Bring up bridge
+    ip netns exec ethns ip link set br0 up
+    
+    # Create veth pair to connect ethernet and kidos namespaces
+    echo "Creating veth pair between ethns and kidosns..."
+    ip netns exec ethns ip link add veth-eth type veth peer name veth-kidos netns kidosns
+    ip netns exec ethns ip link set veth-eth master br0
+    ip netns exec ethns ip link set veth-eth up
+    ip netns exec kidosns ip link set veth-kidos up
+    
+    # Setup DNS for ethns
+    mkdir -p /etc/netns/ethns
+    echo "nameserver 8.8.8.8" > /etc/netns/ethns/resolv.conf
+    echo "hosts: files dns" > /etc/netns/ethns/nsswitch.conf
+else
+    echo "No internet-connected interfaces found, skipping ethns creation"
+fi
+
+# Handle interfaces without internet connectivity
+ETH_COUNTER=1
+for iface in "${NO_INTERNET_IFACES[@]}"; do
+    NS_NAME="ethns${ETH_COUNTER}"
+    BR_NAME="br0-eth${ETH_COUNTER}"
+    VETH_NS="veth-eth${ETH_COUNTER}"
+    VETH_SW="veth-sw-eth${ETH_COUNTER}"
+    
+    echo "Setting up $NS_NAME for $iface..."
+    ip netns add "$NS_NAME"
+    
+    # Move interface to namespace
+    ip link set "$iface" netns "$NS_NAME"
+    ip netns exec "$NS_NAME" ip link set "$iface" up
+    
+    # Create bridge
+    ip netns exec "$NS_NAME" ip link add name "$BR_NAME" type bridge
+    ip netns exec "$NS_NAME" ip link set "$iface" master "$BR_NAME"
+    ip netns exec "$NS_NAME" ip link set "$BR_NAME" up
+    
+    # Create veth pair to switchns
+    ip netns exec "$NS_NAME" ip link add "$VETH_NS" type veth peer name "$VETH_SW" netns switchns
+    ip netns exec "$NS_NAME" ip link set "$VETH_NS" master "$BR_NAME"
+    ip netns exec "$NS_NAME" ip link set "$VETH_NS" up
+    ip netns exec switchns ip link set "$VETH_SW" up
+    
+    # Request DHCP on bridge
+    ip netns exec "$NS_NAME" dhclient "$BR_NAME" &
+    
+    # Setup DNS for ethns{n}
+    mkdir -p "/etc/netns/$NS_NAME"
+    echo "nameserver 8.8.8.8" > "/etc/netns/$NS_NAME/resolv.conf"
+    echo "hosts: files dns" > "/etc/netns/$NS_NAME/nsswitch.conf"
+    
+    echo -e "${GREEN}✓ $iface configured in $NS_NAME${NC}"
+    ETH_COUNTER=$((ETH_COUNTER + 1))
+done
 
 # Create bridge in kidos namespace
 echo "Creating bridge in kidos namespace..."
@@ -90,9 +182,10 @@ ip netns exec switchns ip link set veth-sw-app2 master br-switch
 
 # Bring up the interfaces
 echo "Bringing up interfaces..."
-ip netns exec ethns ip link set veth-eth up
-ip netns exec ethns ip link set br0 up
-ip netns exec kidosns ip link set veth-kidos up
+if [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
+    ip netns exec ethns ip link set br0 up
+    ip netns exec kidosns ip link set veth-kidos up
+fi
 ip netns exec kidosns ip link set veth-kidos-app up
 ip netns exec kidosns ip link set br1 up
 ip netns exec switchns ip link set veth-sw up
@@ -102,6 +195,14 @@ ip netns exec switchns ip link set br-switch up
 ip netns exec appsns ip link set veth-app up
 ip netns exec appsns2 ip link set veth-app up
 
+# Bring up any ethns{n} veth pairs to switchns
+for ((i=1; i<ETH_COUNTER; i++)); do
+    VETH_SW="veth-sw-eth${i}"
+    if ip netns exec switchns ip link show "$VETH_SW" &>/dev/null; then
+        ip netns exec switchns ip link set "$VETH_SW" master br-switch
+    fi
+done
+
 # Configure switchns bridge IP via DHCP
 echo "Configuring IP for switch bridge via DHCP..."
 ip netns exec switchns pkill dhclient 2>/dev/null || true
@@ -110,19 +211,21 @@ ip netns exec switchns dhclient br-switch
 sleep 2
 BR_SWITCH_IP=$(ip netns exec switchns ip -4 addr show br-switch | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -n "$BR_SWITCH_IP" ]; then
-    echo "✓ Got IP via DHCP for br-switch: $BR_SWITCH_IP"
+    echo -e "${GREEN}✓ Got IP via DHCP for br-switch: $BR_SWITCH_IP${NC}"
 else
-    echo "✗ Failed to get DHCP IP for br-switch"
+    echo -e "${RED}✗ Failed to get DHCP IP for br-switch${NC}"
 fi
 
 # Smart IP management: DHCP-then-static with fallback
 IP_CONFIG_FILE="/tmp/kidos-network.conf"
 
-# Run DHCP on ethernet bridge (always needed for upstream connection)
-echo "Requesting IP address via DHCP on ethernet bridge..."
-ip netns exec ethns pkill dhclient 2>/dev/null || true
-sleep 1
-ip netns exec ethns dhclient br0
+# Run DHCP on ethernet bridge (only if ethns exists)
+if [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
+    echo "Requesting IP address via DHCP on ethernet bridge..."
+    ip netns exec ethns pkill dhclient 2>/dev/null || true
+    sleep 1
+    ip netns exec ethns dhclient br0
+fi
 
 # Smart IP assignment for kidos bridge
 echo "Configuring IP for kidos bridge..."
@@ -139,15 +242,15 @@ if [ -f "$IP_CONFIG_FILE" ]; then
     
     # Try to assign static IPs
     if ip netns exec kidosns ip addr add "$BR1_IP/24" dev br1 2>/dev/null; then
-        echo "✓ Assigned stored IP to br1: $BR1_IP"
+        echo -e "${GREEN}✓ Assigned stored IP to br1: $BR1_IP${NC}"
         # Add default gateway
         if [ -n "$GATEWAY" ]; then
             ip netns exec kidosns ip route add default via "$GATEWAY" 2>/dev/null && \
-                echo "✓ Added default gateway: $GATEWAY"
+                echo -e "${GREEN}✓ Added default gateway: $GATEWAY${NC}"
         fi
         BR1_SUCCESS=true
     else
-        echo "⚠ Failed to assign stored IP to br1 (possible conflict), requesting new DHCP lease..."
+        echo -e "${YELLOW}⚠ Failed to assign stored IP to br1 (possible conflict), requesting new DHCP lease...${NC}"
         ip netns exec kidosns dhclient br1
         sleep 2
         NEW_BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
@@ -155,33 +258,33 @@ if [ -f "$IP_CONFIG_FILE" ]; then
             BR1_IP="$NEW_BR1_IP"
             # Capture gateway from DHCP-assigned route
             GATEWAY=$(ip netns exec kidosns ip route | grep default | awk '{print $3}')
-            echo "✓ Got new IP via DHCP for br1: $BR1_IP"
-            echo "✓ Got gateway: $GATEWAY"
+            echo -e "${GREEN}✓ Got new IP via DHCP for br1: $BR1_IP${NC}"
+            echo -e "${GREEN}✓ Got gateway: $GATEWAY${NC}"
             BR1_SUCCESS=true
         fi
     fi
     
     if ip netns exec appsns ip addr add "$VETH_APP_IP/24" dev veth-app 2>/dev/null; then
-        echo "✓ Assigned stored IP to veth-app: $VETH_APP_IP"
+        echo -e "${GREEN}✓ Assigned stored IP to veth-app: $VETH_APP_IP${NC}"
         # Add default gateway
         if [ -n "$GATEWAY" ]; then
             ip netns exec appsns ip route add default via "$GATEWAY" 2>/dev/null && \
-                echo "✓ Added default gateway for appsns: $GATEWAY"
+                echo -e "${GREEN}✓ Added default gateway for appsns: $GATEWAY${NC}"
         fi
         VETH_SUCCESS=true
     else
-        echo "⚠ Failed to assign stored IP to veth-app (possible conflict), requesting DHCP..."
+        echo -e "${YELLOW}⚠ Failed to assign stored IP to veth-app (possible conflict), requesting DHCP...${NC}"
         ip netns exec appsns dhclient veth-app
         sleep 2
         VETH_APP_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
         if [ -n "$VETH_APP_IP" ]; then
             # Get gateway from DHCP-assigned route
             GATEWAY=$(ip netns exec appsns ip route | grep default | awk '{print $3}')
-            echo "✓ Got new IP via DHCP for veth-app: $VETH_APP_IP"
-            echo "✓ Got gateway: $GATEWAY"
+            echo -e "${GREEN}✓ Got new IP via DHCP for veth-app: $VETH_APP_IP${NC}"
+            echo -e "${GREEN}✓ Got gateway: $GATEWAY${NC}"
             VETH_SUCCESS=true
         else
-            echo "✗ Failed to get DHCP IP for veth-app"
+            echo -e "${RED}✗ Failed to get DHCP IP for veth-app${NC}"
             VETH_SUCCESS=false
         fi
     fi
@@ -189,21 +292,21 @@ if [ -f "$IP_CONFIG_FILE" ]; then
     # Configure appsns2 with DHCP
     if [ -n "$VETH_APP2_IP" ]; then
         if ip netns exec appsns2 ip addr add "$VETH_APP2_IP/24" dev veth-app 2>/dev/null; then
-            echo "✓ Assigned stored IP to veth-app (appsns2): $VETH_APP2_IP"
+            echo -e "${GREEN}✓ Assigned stored IP to veth-app (appsns2): $VETH_APP2_IP${NC}"
             # Add default gateway
             if [ -n "$GATEWAY" ]; then
                 ip netns exec appsns2 ip route add default via "$GATEWAY" 2>/dev/null && \
-                    echo "✓ Added default gateway for appsns2: $GATEWAY"
+                    echo -e "${GREEN}✓ Added default gateway for appsns2: $GATEWAY${NC}"
             fi
         else
-            echo "⚠ Failed to assign stored IP to appsns2, requesting DHCP..."
+            echo -e "${YELLOW}⚠ Failed to assign stored IP to appsns2, requesting DHCP...${NC}"
             ip netns exec appsns2 dhclient veth-app
             sleep 2
             VETH_APP2_IP=$(ip netns exec appsns2 ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
             if [ -n "$VETH_APP2_IP" ]; then
-                echo "✓ Got new IP via DHCP for veth-app (appsns2): $VETH_APP2_IP"
+                echo -e "${GREEN}✓ Got new IP via DHCP for veth-app (appsns2): $VETH_APP2_IP${NC}"
             else
-                echo "✗ Failed to get DHCP IP for appsns2"
+                echo -e "${RED}✗ Failed to get DHCP IP for appsns2${NC}"
             fi
         fi
     else
@@ -212,9 +315,9 @@ if [ -f "$IP_CONFIG_FILE" ]; then
         sleep 2
         VETH_APP2_IP=$(ip netns exec appsns2 ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
         if [ -n "$VETH_APP2_IP" ]; then
-            echo "✓ Got IP via DHCP for veth-app (appsns2): $VETH_APP2_IP"
+            echo -e "${GREEN}✓ Got IP via DHCP for veth-app (appsns2): $VETH_APP2_IP${NC}"
         else
-            echo "✗ Failed to get DHCP IP for appsns2"
+            echo -e "${RED}✗ Failed to get DHCP IP for appsns2${NC}"
         fi
     fi
 else
@@ -240,7 +343,7 @@ else
     VETH_APP2_IP=$(ip netns exec appsns2 ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
     
     if [ -n "$BR1_IP" ] && [ -n "$VETH_APP_IP" ] && [ -n "$VETH_APP2_IP" ]; then
-        echo "✓ Received DHCP leases:"
+        echo -e "${GREEN}✓ Received DHCP leases:${NC}"
         echo "  br1: $BR1_IP"
         echo "  veth-app: $VETH_APP_IP"
         echo "  veth-app2: $VETH_APP2_IP"
@@ -259,7 +362,7 @@ if [ "$BR1_SUCCESS" = true ] && [ "$VETH_SUCCESS" = true ]; then
             # Fallback to standard gateway for 192.168.1.0/24 network
             GATEWAY="192.168.1.1"
         fi
-        echo "✓ Detected gateway: $GATEWAY"
+        echo -e "${GREEN}✓ Detected gateway: $GATEWAY${NC}"
     fi
     
     cat > "$IP_CONFIG_FILE" << EOF
@@ -267,7 +370,7 @@ BR1_IP="$BR1_IP"
 VETH_APP_IP="$VETH_APP_IP"
 GATEWAY="$GATEWAY"
 EOF
-    echo "✓ Saved IP configuration to $IP_CONFIG_FILE"
+    echo -e "${GREEN}✓ Saved IP configuration to $IP_CONFIG_FILE${NC}"
 fi
 
 # Setup DNS for appsns
