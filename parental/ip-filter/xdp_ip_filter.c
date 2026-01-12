@@ -189,11 +189,18 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
         }
     }
 
-    // Check if this is UDP traffic (for DoQ blocking)
+    // Check if this is UDP traffic (for DoQ blocking and DHCP)
     if (ip->protocol == IPPROTO_UDP) {
         struct udphdr *udp = (void *)ip + (ip->ihl * 4);
         if ((void *)(udp + 1) > data_end)
             return XDP_PASS;
+
+        // Always allow DHCP traffic (ports 67 and 68)
+        // DHCP client (68) -> server (67) and vice versa
+        if (udp->source == bpf_htons(68) || udp->dest == bpf_htons(67) ||
+            udp->source == bpf_htons(67) || udp->dest == bpf_htons(68)) {
+            return XDP_PASS;
+        }
 
         // Check for DoQ (port 853 or 784)
         if (udp->dest == bpf_htons(853) || udp->dest == bpf_htons(784)) {
