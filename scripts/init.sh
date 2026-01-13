@@ -102,44 +102,6 @@ else
     echo "No internet-connected interfaces found, skipping ethns creation"
 fi
 
-# Handle interfaces without internet connectivity
-ETH_COUNTER=1
-for iface in "${NO_INTERNET_IFACES[@]}"; do
-    NS_NAME="ethns${ETH_COUNTER}"
-    BR_NAME="br0-eth${ETH_COUNTER}"
-    VETH_NS="veth-eth${ETH_COUNTER}"
-    VETH_SW="veth-sw-eth${ETH_COUNTER}"
-    
-    echo "Setting up $NS_NAME for $iface..."
-    ip netns add "$NS_NAME"
-    
-    # Move interface to namespace
-    ip link set "$iface" netns "$NS_NAME"
-    ip netns exec "$NS_NAME" ip link set "$iface" up
-    
-    # Create bridge
-    ip netns exec "$NS_NAME" ip link add name "$BR_NAME" type bridge
-    ip netns exec "$NS_NAME" ip link set "$iface" master "$BR_NAME"
-    ip netns exec "$NS_NAME" ip link set "$BR_NAME" up
-    
-    # Create veth pair to switchns
-    ip netns exec "$NS_NAME" ip link add "$VETH_NS" type veth peer name "$VETH_SW" netns switchns
-    ip netns exec "$NS_NAME" ip link set "$VETH_NS" master "$BR_NAME"
-    ip netns exec "$NS_NAME" ip link set "$VETH_NS" up
-    ip netns exec switchns ip link set "$VETH_SW" up
-    
-    # Request DHCP on bridge
-    ip netns exec "$NS_NAME" dhclient "$BR_NAME" &
-    
-    # Setup DNS for ethns{n}
-    mkdir -p "/etc/netns/$NS_NAME"
-    echo "nameserver 8.8.8.8" > "/etc/netns/$NS_NAME/resolv.conf"
-    echo "hosts: files dns" > "/etc/netns/$NS_NAME/nsswitch.conf"
-    
-    echo -e "${GREEN}✓ $iface configured in $NS_NAME${NC}"
-    ETH_COUNTER=$((ETH_COUNTER + 1))
-done
-
 # Create bridge in kidos namespace
 echo "Creating bridge in kidos namespace..."
 ip netns exec kidosns ip link add name br1 type bridge
@@ -195,14 +157,6 @@ ip netns exec switchns ip link set br-switch up
 ip netns exec appsns ip link set veth-app up
 ip netns exec appsns2 ip link set veth-app up
 
-# Bring up any ethns{n} veth pairs to switchns
-for ((i=1; i<ETH_COUNTER; i++)); do
-    VETH_SW="veth-sw-eth${i}"
-    if ip netns exec switchns ip link show "$VETH_SW" &>/dev/null; then
-        ip netns exec switchns ip link set "$VETH_SW" master br-switch
-    fi
-done
-
 # Configure switchns bridge IP via DHCP
 echo "Configuring IP for switch bridge via DHCP..."
 ip netns exec switchns pkill dhclient 2>/dev/null || true
@@ -215,6 +169,49 @@ if [ -n "$BR_SWITCH_IP" ]; then
 else
     echo -e "${RED}✗ Failed to get DHCP IP for br-switch${NC}"
 fi
+
+# Handle interfaces without internet connectivity (after br-switch has IP)
+ETH_COUNTER=1
+for iface in "${NO_INTERNET_IFACES[@]}"; do
+    NS_NAME="ethns${ETH_COUNTER}"
+    BR_NAME="br0-eth${ETH_COUNTER}"
+    VETH_NS="veth-eth${ETH_COUNTER}"
+    VETH_SW="veth-sw-eth${ETH_COUNTER}"
+    
+    echo "Setting up $NS_NAME for $iface..."
+    ip netns add "$NS_NAME"
+    
+    # Move interface to namespace
+    ip link set "$iface" netns "$NS_NAME"
+    ip netns exec "$NS_NAME" ip link set "$iface" up
+    
+    # Create bridge
+    ip netns exec "$NS_NAME" ip link add name "$BR_NAME" type bridge
+    ip netns exec "$NS_NAME" ip link set "$iface" master "$BR_NAME"
+    ip netns exec "$NS_NAME" ip link set "$BR_NAME" up
+    
+    # Create veth pair to switchns
+    ip netns exec "$NS_NAME" ip link add "$VETH_NS" type veth peer name "$VETH_SW" netns switchns
+    ip netns exec "$NS_NAME" ip link set "$VETH_NS" master "$BR_NAME"
+    ip netns exec "$NS_NAME" ip link set "$VETH_NS" up
+    ip netns exec switchns ip link set "$VETH_SW" master br-switch
+    ip netns exec switchns ip link set "$VETH_SW" up
+    
+    # Setup DNS for ethns{n}
+    mkdir -p "/etc/netns/$NS_NAME"
+    echo "nameserver 8.8.8.8" > "/etc/netns/$NS_NAME/resolv.conf"
+    echo "hosts: files dns" > "/etc/netns/$NS_NAME/nsswitch.conf"
+    
+    # Request DHCP on bridge (now that br-switch has IP)
+    echo "Requesting DHCP for $BR_NAME..."
+    ip netns exec "$NS_NAME" pkill dhclient 2>/dev/null || true
+    sleep 1
+    ip netns exec "$NS_NAME" dhclient "$BR_NAME"
+    
+    echo -e "${GREEN}✓ $iface configured in $NS_NAME${NC}"
+    ETH_COUNTER=$((ETH_COUNTER + 1))
+done
+sleep 2
 
 # Smart IP management: DHCP-then-static with fallback
 IP_CONFIG_FILE="/tmp/kidos-network.conf"
