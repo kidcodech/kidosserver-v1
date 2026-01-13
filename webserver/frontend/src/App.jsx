@@ -163,12 +163,19 @@ function App() {
   
   // Update activeTab when location changes
   useEffect(() => {
-    setActiveTabState(getActiveTab())
+    const tab = getActiveTab()
+    setActiveTabState(tab)
+    if (tab === 'hotspot') {
+      setHotspotLoading(true)
+    }
   }, [location])
   
   // Function to change tab and update URL
   const setActiveTab = (tab) => {
     setActiveTabState(tab)
+    if (tab === 'hotspot') {
+      setHotspotLoading(true)
+    }
     navigate(`/admin/${tab}`)
   }
   
@@ -213,6 +220,20 @@ function App() {
   const [blockDoH, setBlockDoH] = useState(true)
   const [dohProviders, setDohProviders] = useState([])
   const [newDoHProvider, setNewDoHProvider] = useState({ name: '', ip_address: '' })
+  
+  // Hotspot state
+  const [hotspotConfig, setHotspotConfig] = useState({ 
+    ssid: 'Kidos-Hotspot', 
+    password: 'kidos12345', 
+    channel: '6', 
+    security: 'WPA2',
+    interface: ''
+  })
+  const [hotspotStatus, setHotspotStatus] = useState({ running: false, clients: [] })
+  const [wifiInterfaces, setWifiInterfaces] = useState([])
+  const [showHotspotPassword, setShowHotspotPassword] = useState(false)
+  const [isRestartingHotspot, setIsRestartingHotspot] = useState(false)
+  const [hotspotLoading, setHotspotLoading] = useState(getActiveTab() === 'hotspot')
 
   // Setup WebSocket connection once
   useEffect(() => {
@@ -262,6 +283,14 @@ function App() {
     fetchUnregisteredDevices()
     fetchSystemSettings()
     fetchDoHProviders()
+    if (activeTab === 'hotspot') {
+      setHotspotLoading(true)
+      Promise.all([
+        fetchWifiInterfaces(),
+        fetchHotspotStatus(),
+        fetchHotspotConfig()
+      ]).finally(() => setHotspotLoading(false))
+    }
   }, [activeTab])
 
   // Auto-refresh based on active tab
@@ -275,6 +304,9 @@ function App() {
       }
       if (activeTab === 'users' && usersSubTab === 'devices') {
         fetchUnregisteredDevices()
+      }
+      if (activeTab === 'hotspot') {
+        fetchHotspotStatus()
       }
     }, 1000)
 
@@ -316,6 +348,132 @@ function App() {
       }
     } catch (error) {
       console.error('Error fetching DoH providers:', error)
+    }
+  }
+
+  // Hotspot API functions
+  const fetchWifiInterfaces = async () => {
+    try {
+      const response = await fetch('/api/hotspot/interfaces')
+      if (response.ok) {
+        const data = await response.json()
+        setWifiInterfaces(data || [])
+        
+        if (data && data.length > 0) {
+          setHotspotConfig(prev => {
+            // Only set default interface if none is currently selected
+            if (prev.interface) return prev
+            
+            const available = data.find(i => !i.has_ip)
+            return { 
+              ...prev, 
+              interface: available ? available.name : data[0].name 
+            }
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching wifi interfaces:', error)
+    }
+  }
+
+  const fetchHotspotStatus = async () => {
+    try {
+      const response = await fetch('/api/hotspot/status')
+      if (response.ok) {
+        const data = await response.json()
+        setHotspotStatus(data)
+      }
+    } catch (error) {
+      console.error('Error fetching hotspot status:', error)
+    }
+  }
+
+  const fetchHotspotConfig = async () => {
+    try {
+      const response = await fetch('/api/hotspot/config')
+      if (response.ok) {
+        const data = await response.json()
+        if (data) setHotspotConfig(data)
+      }
+    } catch (error) {
+      console.error('Error fetching hotspot config:', error)
+    }
+  }
+
+  const saveHotspotConfig = async () => {
+    if (!hotspotConfig.interface) {
+        alert('Please select a Wi-Fi interface');
+        return;
+    }
+    try {
+      await fetch('/api/hotspot/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(hotspotConfig)
+      })
+      alert('Hotspot configuration saved')
+    } catch (error) {
+      console.error('Error saving hotspot config:', error)
+      alert('Failed to save configuration')
+    }
+  }
+
+  const startHotspot = async () => {
+    if (!hotspotConfig.interface) {
+        alert('Please select a Wi-Fi interface');
+        return;
+    }
+    try {
+      const response = await fetch('/api/hotspot/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(hotspotConfig)
+      })
+      if (response.ok) {
+        alert('Hotspot started successfully')
+        fetchHotspotStatus()
+      } else {
+        const error = await response.text()
+        alert('Failed to start hotspot: ' + error)
+      }
+    } catch (error) {
+      console.error('Error starting hotspot:', error)
+      alert('Failed to start hotspot')
+    }
+  }
+
+  const stopHotspot = async () => {
+    try {
+      await fetch('/api/hotspot/stop', { method: 'POST' })
+      alert('Hotspot stopped')
+      fetchHotspotStatus()
+    } catch (error) {
+      console.error('Error stopping hotspot:', error)
+      alert('Failed to stop hotspot')
+    }
+  }
+
+  const restartHotspot = async () => {
+    setIsRestartingHotspot(true)
+    try {
+      const response = await fetch('/api/hotspot/restart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(hotspotConfig)
+      })
+      if (response.ok) {
+        await fetchHotspotStatus()
+        setTimeout(() => setIsRestartingHotspot(false), 500)
+      } else {
+        const error = await response.text()
+        alert('Failed to restart hotspot: ' + error)
+        setIsRestartingHotspot(false)
+      }
+    } catch (error) {
+      console.error('Error restarting hotspot:', error)
+      alert('Failed to restart hotspot')
+      setIsRestartingHotspot(false)
     }
   }
 
@@ -1026,6 +1184,13 @@ function App() {
           >
             <span className="nav-icon">🔧</span>
             <span className="nav-text">Settings</span>
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'hotspot' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('hotspot'); setIsMobileMenuOpen(false); }}
+          >
+            <span className="nav-icon">📡</span>
+            <span className="nav-text">Hotspot</span>
           </button>
         </nav>
         {!isMobile && (
@@ -2087,6 +2252,218 @@ function App() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'hotspot' && (
+        <div className="settings-section">
+          <h2>Wi-Fi Hotspot</h2>
+          
+          {hotspotLoading ? (
+             <div style={{
+                display: 'flex', 
+                justifyContent: 'center', 
+                alignItems: 'center', 
+                height: '200px', 
+                color: '#aaa', 
+                fontSize: '1.2rem',
+                backgroundColor: '#1a1a2e',
+                borderRadius: '8px',
+                border: '1px solid #2a2a3e'
+             }}>
+                Loading hotspot details...
+             </div>
+          ) : (
+          <>
+          <div className="setting-card">
+            <div className="setting-header">
+              <h3>Hotspot Status</h3>
+              <span className={`status ${hotspotStatus.running ? 'connected' : 'disconnected'}`}>
+                {hotspotStatus.running ? '● Running' : '○ Stopped'}
+              </span>
+            </div>
+            {hotspotStatus.running && hotspotStatus.clients && hotspotStatus.clients.length > 0 && (
+              <div style={{marginTop: '1rem'}}>
+                <strong>Connected Clients: {hotspotStatus.clients.length}</strong>
+                <ul style={{marginTop: '0.5rem', paddingLeft: '1.5rem'}}>
+                  {hotspotStatus.clients.map((client, idx) => (
+                    <li key={idx} style={{fontFamily: 'monospace'}}>{client}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div style={{marginTop: '1rem', display: 'flex', gap: '0.5rem'}}>
+              <button 
+                onClick={startHotspot} 
+                className="btn btn-success"
+                disabled={hotspotStatus.running}
+              >
+                Start Hotspot
+              </button>
+              <button 
+                onClick={stopHotspot} 
+                className="btn btn-danger"
+              >
+                Stop Hotspot
+              </button>
+              <button 
+                onClick={restartHotspot} 
+                className="btn btn-primary"
+                disabled={!hotspotStatus.running}
+              >
+                Restart Hotspot
+              </button>
+            </div>
+          </div>
+
+          <div className="setting-card">
+            <h3>{hotspotStatus.running || isRestartingHotspot ? "Hotspot Details" : "Hotspot Configuration"}</h3>
+            
+            {hotspotStatus.running || isRestartingHotspot ? (
+               <div style={{
+                 display: 'flex', 
+                 flexDirection: 'column', 
+                 gap: '1rem', 
+                 padding: '1rem', 
+                 backgroundColor: 'rgba(255,255,255,0.05)', 
+                 borderRadius: '8px',
+                 opacity: isRestartingHotspot ? 0.3 : 1,
+                 transition: 'opacity 0.5s ease-in-out',
+                 pointerEvents: isRestartingHotspot ? 'none' : 'auto'
+               }}>
+                <div style={{display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem'}}>
+                  <span style={{color: '#ddd'}}>SSID</span>
+                  <span style={{fontWeight: 'bold', color: '#fff'}}>{hotspotConfig.ssid}</span>
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem'}}>
+                  <span style={{color: '#ddd'}}>Interface</span>
+                  <span style={{fontFamily: 'monospace', color: '#fff'}}>{hotspotConfig.interface}</span>
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem'}}>
+                  <span style={{color: '#ddd'}}>Channel</span>
+                  <span style={{color: '#fff'}}>{hotspotConfig.channel}</span>
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem'}}>
+                  <span style={{color: '#ddd'}}>Security</span>
+                  <span style={{color: '#fff'}}>{hotspotConfig.security}</span>
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                  <span style={{color: '#ddd'}}>Password</span>
+                  <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                     <span style={{fontFamily: 'monospace', letterSpacing: '1px', color: '#fff'}}>
+                        {showHotspotPassword ? hotspotConfig.password : '••••••••'}
+                     </span>
+                     <button 
+                        className="btn btn-small"
+                        onClick={() => setShowHotspotPassword(!showHotspotPassword)}
+                        style={{padding: '4px 8px', fontSize: '0.75rem'}}
+                     >
+                        {showHotspotPassword ? 'Hide' : 'Show'}
+                     </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '8px'}}>
+            <div className="form-group">
+              <label>Wi-Fi Interface</label>
+              <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
+              <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                <select 
+                  value={hotspotConfig.interface}
+                  onChange={(e) => setHotspotConfig({...hotspotConfig, interface: e.target.value})}
+                  className="domain-input"
+                  style={{flex: 1}}
+                >
+                  <option value="">Select interface...</option>
+                  {wifiInterfaces.map(iface => (
+                    <option 
+                        key={iface.name} 
+                        value={iface.name}
+                        disabled={iface.has_ip}
+                        style={iface.has_ip ? {color: '#999'} : {}}
+                    >
+                        {iface.name} {iface.has_ip ? '(Has IP - In Use)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={fetchWifiInterfaces} className="btn btn-small">
+                  🔄 Refresh
+                </button>
+              </div>
+                <small style={{color: '#aaa', fontSize: '0.8rem'}}>
+                    Note: Interfaces with an IP address are in use. Stop the interface before creating a hotspot.
+                </small>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>SSID (Network Name)</label>
+              <input 
+                type="text" 
+                value={hotspotConfig.ssid}
+                onChange={(e) => setHotspotConfig({...hotspotConfig, ssid: e.target.value})}
+                placeholder="Kidos-Hotspot"
+                className="domain-input"
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Password</label>
+              <div style={{display: 'flex', gap: '0.5rem'}}>
+                  <input 
+                    type={showHotspotPassword ? "text" : "password"}
+                    value={hotspotConfig.password}
+                    onChange={(e) => setHotspotConfig({...hotspotConfig, password: e.target.value})}
+                    placeholder="Minimum 8 characters"
+                    className="domain-input"
+                    minLength="8"
+                    style={{flex: 1}}
+                  />
+                   <button 
+                      className="btn btn-small"
+                      onClick={() => setShowHotspotPassword(!showHotspotPassword)}
+                      type="button"
+                    >
+                      {showHotspotPassword ? 'Hide' : 'Show'}
+                    </button>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Channel</label>
+              <select 
+                value={hotspotConfig.channel}
+                onChange={(e) => setHotspotConfig({...hotspotConfig, channel: e.target.value})}
+                className="domain-input"
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(ch => (
+                  <option key={ch} value={ch}>{ch}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Security</label>
+              <select 
+                value={hotspotConfig.security}
+                onChange={(e) => setHotspotConfig({...hotspotConfig, security: e.target.value})}
+                className="domain-input"
+              >
+                <option value="WPA2">WPA2</option>
+                <option value="WPA3">WPA3</option>
+                <option value="WPA2/WPA3">WPA2/WPA3 Mixed</option>
+              </select>
+            </div>
+
+            <button onClick={saveHotspotConfig} className="btn btn-primary" style={{marginTop: '0.5rem'}}>
+              Save Configuration
+            </button>
+            </div>
+            )}
+          </div>
+          </>
+          )}
         </div>
       )}
 

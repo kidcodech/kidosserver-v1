@@ -1,8 +1,11 @@
 #!/bin/bash
 
-# Configuration
-SSID="KidosNet"
-PASSWORD=${HOTSPOT_PASSWORD:-"kidos123"}
+# Configuration - can be overridden by environment variables or arguments
+SSID="${1:-${SSID:-KidosNet}}"
+PASSWORD="${2:-${HOTSPOT_PASSWORD:-kidos123}}"
+CHANNEL="${3:-${CHANNEL:-6}}"
+SECURITY="${4:-${SECURITY:-WPA2}}"
+IFACE="${5:-}"
 
 set -e
 
@@ -19,87 +22,130 @@ if ! command -v hostapd &> /dev/null; then
     fi
 fi
 
-# Cleanup
-./scripts/hotspot/teardown.sh 2>/dev/null || true
-
-# Detect USB Wi-Fi dongles (exclude internal Wi-Fi)
-echo "Detecting USB Wi-Fi dongles..."
-USB_WIFI_DEVICES=$(lsusb | grep -iE "802\.11|wifi|wireless|wlan|rtl|realtek|ralink|atheros|mediatek|tp-link" || true)
-
-if [ -z "$USB_WIFI_DEVICES" ]; then
-    echo "Error: No USB Wi-Fi dongle detected"
-    echo "Available USB devices:"
-    lsusb
-    exit 1
-fi
-
-echo "Found USB Wi-Fi devices:"
-echo "$USB_WIFI_DEVICES"
-
-# Detect chipset and determine driver
-DRIVER_MODULE=""
-if echo "$USB_WIFI_DEVICES" | grep -q "RTL8822BU\|8822bu"; then
-    DRIVER_MODULE="rtw88_8822bu"
-    echo "Detected RTL8822BU chipset"
-elif echo "$USB_WIFI_DEVICES" | grep -q "RTL8821AU\|8821au\|2357:0120"; then
-    DRIVER_MODULE="rtw88_8821au"
-    echo "Detected RTL8821AU chipset (Archer T2U PLUS)"
-elif echo "$USB_WIFI_DEVICES" | grep -q "RTL88"; then
-    DRIVER_MODULE="rtw88_usb"
-    echo "Detected RTL88xx series chipset"
-else
-    echo "Warning: Unknown chipset, will try generic drivers"
-    DRIVER_MODULE="rtw88_usb"
-fi
-
-# Reload kernel modules to ensure clean state (fixes firmware crashes)
-echo "Reloading Wi-Fi driver modules for $DRIVER_MODULE..."
-modprobe -r rtw88_8822bu 2>/dev/null || true
-modprobe -r rtw88_8821au 2>/dev/null || true
-modprobe -r rtw88_usb 2>/dev/null || true
-modprobe -r rtw_usb 2>/dev/null || true
-sleep 1
-
-# Load the detected driver
-if [ -n "$DRIVER_MODULE" ]; then
-    modprobe "$DRIVER_MODULE" 2>/dev/null || modprobe rtw88_usb 2>/dev/null || modprobe rtw_usb 2>/dev/null || true
-else
-    modprobe rtw88_usb 2>/dev/null || modprobe rtw_usb 2>/dev/null || true
-fi
-
-# Wait for USB interface to appear (exclude internal Wi-Fi)
-echo "Waiting for USB Wi-Fi interface to initialize..."
-IFACE=""
-timeout=10
-while [ "$timeout" -gt 0 ]; do
-    # Find wireless interfaces with 'u' in name (USB) or via sysfs check
-    for iface in $(iw dev 2>/dev/null | grep Interface | awk '{print $2}' || true); do
-        # Check if it's a USB device (interface name contains 'u' like wlp0s20f0u1)
-        if echo "$iface" | grep -q "u[0-9]"; then
-            IFACE="$iface"
-            echo "✓ Found USB wireless interface: $IFACE"
-            break 2
+# Cleanup - run inline to avoid permission issues
+echo "Cleaning up any existing hotspot..."
+# First, try to move any wifi interfaces back to root namespace
+if ip netns exec wifins ip link show 2>/dev/null | grep -q "^[0-9]*: wl"; then
+    # Get the wifi interface name in the namespace
+    EXISTING_IFACE=$(ip netns exec wifins ip link | grep -E "^[0-9]+: wl" | awk -F: '{print $2}' | awk '{print $1}' | head -n1)
+    if [ -n "$EXISTING_IFACE" ]; then
+        echo "Moving $EXISTING_IFACE back to host namespace..."
+        # Get PHY and move it back
+        EXISTING_PHY=$(ip netns exec wifins iw dev "$EXISTING_IFACE" info 2>/dev/null | grep wiphy | awk '{print $2}')
+        if [ -n "$EXISTING_PHY" ]; then
+            ip netns exec wifins iw phy "phy$EXISTING_PHY" set netns 1 2>/dev/null || true
         fi
-    done
-    sleep 1
-    timeout=$((timeout-1))
-done
+    fi
+fi
+ip netns exec wifins pkill hostapd 2>/dev/null || true
+ip netns exec wifins pkill dhclient 2>/dev/null || true
+ip netns exec switchns ip link del veth-wifi-sw 2>/dev/null || true
+ip netns del wifins 2>/dev/null || true
+# Force remove namespace file if it still exists
+rm -f /var/run/netns/wifins 2>/dev/null || true
+rm -f /tmp/kidos-hostapd.conf
+sleep 0.5
 
+# If interface not specified, detect USB Wi-Fi dongles
 if [ -z "$IFACE" ]; then
-    echo "Error: No USB wireless interface found after module reload"
-    echo "Available wireless interfaces:"
-    iw dev 2>/dev/null || true
-    echo ""
-    echo "Available network interfaces:"
-    ip link show | grep -E "^[0-9]+:"
-    exit 1
+    echo "No interface specified, detecting USB Wi-Fi dongles..."
+    USB_WIFI_DEVICES=$(lsusb | grep -iE "802\.11|wifi|wireless|wlan|rtl|realtek|ralink|atheros|mediatek|tp-link" || true)
+
+    if [ -z "$USB_WIFI_DEVICES" ]; then
+        echo "Error: No USB Wi-Fi dongle detected"
+        echo "Available USB devices:"
+        lsusb
+        exit 1
+    fi
+
+    echo "Found USB Wi-Fi devices:"
+    echo "$USB_WIFI_DEVICES"
+
+    # Detect chipset and determine driver
+    DRIVER_MODULE=""
+    if echo "$USB_WIFI_DEVICES" | grep -q "RTL8822BU\|8822bu"; then
+        DRIVER_MODULE="rtw88_8822bu"
+        echo "Detected RTL8822BU chipset"
+    elif echo "$USB_WIFI_DEVICES" | grep -q "RTL8821AU\|8821au\|2357:0120"; then
+        DRIVER_MODULE="rtw88_8821au"
+        echo "Detected RTL8821AU chipset (Archer T2U PLUS)"
+    elif echo "$USB_WIFI_DEVICES" | grep -q "RTL88"; then
+        DRIVER_MODULE="rtw88_usb"
+        echo "Detected RTL88xx series chipset"
+    else
+        echo "Warning: Unknown chipset, will try generic drivers"
+        DRIVER_MODULE="rtw88_usb"
+    fi
+
+    # Reload kernel modules to ensure clean state (fixes firmware crashes)
+    echo "Reloading Wi-Fi driver modules for $DRIVER_MODULE..."
+    modprobe -r rtw88_8822bu 2>/dev/null || true
+    modprobe -r rtw88_8821au 2>/dev/null || true
+    modprobe -r rtw88_usb 2>/dev/null || true
+    modprobe -r rtw_usb 2>/dev/null || true
+    sleep 1
+
+    # Load the detected driver
+    if [ -n "$DRIVER_MODULE" ]; then
+        modprobe "$DRIVER_MODULE" 2>/dev/null || modprobe rtw88_usb 2>/dev/null || modprobe rtw_usb 2>/dev/null || true
+    else
+        modprobe rtw88_usb 2>/dev/null || modprobe rtw_usb 2>/dev/null || true
+    fi
+
+    # Wait for USB interface to appear (exclude internal Wi-Fi)
+    echo "Waiting for USB Wi-Fi interface to initialize..."
+    IFACE=""
+    timeout=10
+    while [ "$timeout" -gt 0 ]; do
+        # Find wireless interfaces with 'u' in name (USB) or via sysfs check
+        for iface in $(iw dev 2>/dev/null | grep Interface | awk '{print $2}' || true); do
+            # Check if it's a USB device (interface name contains 'u' like wlp0s20f0u1)
+            if echo "$iface" | grep -q "u[0-9]"; then
+                IFACE="$iface"
+                echo "✓ Found USB wireless interface: $IFACE"
+                break 2
+            fi
+        done
+        sleep 1
+        timeout=$((timeout-1))
+    done
+
+    if [ -z "$IFACE" ]; then
+        echo "Error: No USB wireless interface found after module reload"
+        echo "Available wireless interfaces:"
+        iw dev 2>/dev/null || true
+        echo ""
+        echo "Available network interfaces:"
+        ip link show | grep -E "^[0-9]+:"
+        exit 1
+    fi
+else
+    echo "Using specified interface: $IFACE"
+    # Verify the interface exists
+    if ! ip link show "$IFACE" &>/dev/null; then
+        echo "Error: Interface $IFACE does not exist"
+        echo "Available network interfaces:"
+        ip link show | grep -E "^[0-9]+:"
+        exit 1
+    fi
 fi
 
 echo "Setting up Kidos Hotspot in namespace 'wifins' (L2 Bridge Mode)..."
 
 # 1. Prepare Namespaces
 # Create wifins
-ip netns add wifins
+echo "Creating wifins namespace..."
+if ! ip netns add wifins 2>/dev/null; then
+    echo "Failed to create wifins namespace, attempting cleanup..."
+    ip netns del wifins 2>/dev/null || true
+    rm -f /var/run/netns/wifins
+    sleep 0.5
+    if ! ip netns add wifins; then
+        echo "Error: Failed to create wifins namespace after cleanup"
+        exit 1
+    fi
+fi
+echo "✓ wifins namespace created"
 
 # 2. Network Layout
 # Link wifins <-> switchns
@@ -129,14 +175,25 @@ echo "Moving $IFACE to wifins..."
 # Stop NetworkManager from managing it just in case
 nmcli device set "$IFACE" managed no 2>/dev/null || true
 
+# Bring interface down first
+ip link set "$IFACE" down 2>/dev/null || true
+
 # Try moving via iw phy (more reliable for wifi)
 PHY=$(iw dev "$IFACE" info | grep wiphy | awk '{print $2}')
 if [ -n "$PHY" ]; then
     echo "Detected PHY: phy$PHY"
-    iw phy "phy$PHY" set netns name wifins
+    if ! iw phy "phy$PHY" set netns name wifins 2>&1; then
+        echo "Error: Failed to move phy$PHY to wifins namespace"
+        echo "This usually means the interface is in use or in another namespace"
+        exit 1
+    fi
 else
+    echo "Warning: Could not detect PHY, trying ip link method..."
     # Fallback to ip link
-    ip link set "$IFACE" netns wifins
+    if ! ip link set "$IFACE" netns wifins 2>&1; then
+        echo "Error: Failed to move $IFACE to wifins namespace"
+        exit 1
+    fi
 fi
 
 # We need to find the new interface name inside the namespace
@@ -153,20 +210,46 @@ ip netns exec wifins ip link set "$NEW_IFACE" up
 
 # 3. Hostapd Configuration
 echo "Generating hostapd config..."
-cat <<EOF > /tmp/kidos-hostapd.conf
+
+# Set wpa mode based on security type
+WPA_MODE=0
+if [ "$SECURITY" = "WPA2" ]; then
+    WPA_MODE=2
+elif [ "$SECURITY" = "WPA" ]; then
+    WPA_MODE=1
+elif [ "$SECURITY" = "OPEN" ]; then
+    WPA_MODE=0
+fi
+
+if [ "$WPA_MODE" -eq 0 ]; then
+    # Open network
+    cat <<EOF > /tmp/kidos-hostapd.conf
 interface=$NEW_IFACE
 bridge=br-wifi
 driver=nl80211
 ssid=$SSID
 hw_mode=g
-channel=6
-wpa=2
+channel=$CHANNEL
+ieee80211n=1
+wmm_enabled=1
+EOF
+else
+    # WPA/WPA2 network
+    cat <<EOF > /tmp/kidos-hostapd.conf
+interface=$NEW_IFACE
+bridge=br-wifi
+driver=nl80211
+ssid=$SSID
+hw_mode=g
+channel=$CHANNEL
+wpa=$WPA_MODE
 wpa_passphrase=$PASSWORD
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 ieee80211n=1
 wmm_enabled=1
 EOF
+fi
 
 # 4. Start Services
 echo "Starting hostapd..."

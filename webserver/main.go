@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,6 +57,27 @@ type DNSRequest struct {
 type WebSocketMessage struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data"`
+}
+
+// WifiInterface represents a wifi interface and its status
+type WifiInterface struct {
+	Name  string `json:"name"`
+	HasIP bool   `json:"has_ip"`
+}
+
+// HotspotConfig represents hotspot configuration
+type HotspotConfig struct {
+	SSID      string `json:"ssid"`
+	Password  string `json:"password"`
+	Channel   string `json:"channel"`
+	Security  string `json:"security"`
+	Interface string `json:"interface"`
+}
+
+// HotspotStatus represents hotspot status
+type HotspotStatus struct {
+	Running bool     `json:"running"`
+	Clients []string `json:"clients"`
 }
 
 var (
@@ -134,6 +156,15 @@ func main() {
 	router.HandleFunc("/api/doh/providers", addDoHProvider).Methods("POST")
 	router.HandleFunc("/api/doh/providers/{id}", deleteDoHProvider).Methods("DELETE")
 	router.HandleFunc("/api/doh/providers/{id}/toggle", toggleDoHProvider).Methods("PUT")
+
+	// Hotspot endpoints
+	router.HandleFunc("/api/hotspot/interfaces", getWifiInterfaces).Methods("GET")
+	router.HandleFunc("/api/hotspot/status", getHotspotStatus).Methods("GET")
+	router.HandleFunc("/api/hotspot/config", getHotspotConfig).Methods("GET")
+	router.HandleFunc("/api/hotspot/config", saveHotspotConfig).Methods("POST")
+	router.HandleFunc("/api/hotspot/start", startHotspot).Methods("POST")
+	router.HandleFunc("/api/hotspot/stop", stopHotspot).Methods("POST")
+	router.HandleFunc("/api/hotspot/restart", restartHotspot).Methods("POST")
 
 	router.HandleFunc("/ws", handleWebSocket)
 
@@ -1683,4 +1714,219 @@ func toggleDoHProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// Hotspot handlers
+const hotspotConfigFile = "/tmp/kidos-hotspot-config.json"
+
+func getWifiInterfaces(w http.ResponseWriter, r *http.Request) {
+	// Run in host namespace (PID 1) to see all physical interfaces
+	cmd := exec.Command("bash", "-c", "sudo nsenter --target 1 --net --mount ip link show | grep -E '^[0-9]+: (wl|wlan)' | awk -F': ' '{print $2}'")
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("Error listing interfaces: %v", err)
+		http.Error(w, "Failed to list wifi interfaces", http.StatusInternalServerError)
+		return
+	}
+
+	interfacesList := []WifiInterface{}
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, ifaceName := range lines {
+		if ifaceName != "" {
+			hasIP := false
+			// Check if interface has IP address
+			checkCmd := exec.Command("bash", "-c", fmt.Sprintf("sudo nsenter --target 1 --net --mount ip addr show %s | grep 'inet '", ifaceName))
+			if err := checkCmd.Run(); err == nil {
+				hasIP = true
+			}
+
+			interfacesList = append(interfacesList, WifiInterface{
+				Name:  ifaceName,
+				HasIP: hasIP,
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(interfacesList)
+}
+
+func getHotspotStatus(w http.ResponseWriter, r *http.Request) {
+	status := HotspotStatus{
+		Running: false,
+		Clients: []string{},
+	}
+
+	// Check if hostapd is running
+	cmd := exec.Command("ip", "netns", "exec", "wifins", "pgrep", "-f", "hostapd")
+	if err := cmd.Run(); err == nil {
+		status.Running = true
+
+		// Get connected clients from hostapd
+		cmd = exec.Command("ip", "netns", "exec", "wifins", "hostapd_cli", "all_sta")
+		if output, err := cmd.Output(); err == nil {
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "sta ") || strings.Contains(line, ":") && len(line) == 17 {
+					mac := strings.TrimSpace(strings.TrimPrefix(line, "sta "))
+					if mac != "" {
+						status.Clients = append(status.Clients, mac)
+					}
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+func getHotspotConfig(w http.ResponseWriter, r *http.Request) {
+	data, err := ioutil.ReadFile(hotspotConfigFile)
+	if err != nil {
+		// Return default config if file doesn't exist
+		config := HotspotConfig{
+			SSID:     "Kidos-Hotspot",
+			Password: "kidos12345",
+			Channel:  "6",
+			Security: "WPA2",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(config)
+		return
+	}
+
+	var config HotspotConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		http.Error(w, "Failed to parse config", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}
+
+func saveHotspotConfig(w http.ResponseWriter, r *http.Request) {
+	var config HotspotConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		http.Error(w, "Failed to serialize config", http.StatusInternalServerError)
+		return
+	}
+
+	if err := ioutil.WriteFile(hotspotConfigFile, data, 0644); err != nil {
+		http.Error(w, "Failed to save config", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func startHotspot(w http.ResponseWriter, r *http.Request) {
+	var config HotspotConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Save config first
+	data, _ := json.Marshal(config)
+	ioutil.WriteFile(hotspotConfigFile, data, 0644)
+
+	// Setup hotspot using the init script logic
+	if err := setupHotspot(config); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func stopHotspot(w http.ResponseWriter, r *http.Request) {
+	log.Println("Stopping hotspot...")
+
+	// Call the teardown script
+	wd, _ := os.Getwd()
+	workspaceRoot := filepath.Dir(wd)
+	scriptPath := filepath.Join(workspaceRoot, "scripts", "hotspot", "teardown.sh")
+
+	cmd := exec.Command("sudo", "nsenter", "--target", "1", "--net", "--mount", "bash", scriptPath)
+
+	output, err := cmd.CombinedOutput()
+	log.Printf("Teardown script output:\n%s", string(output))
+
+	if err != nil {
+		log.Printf("Warning: teardown script returned error: %v", err)
+		// Don't fail the API call as teardown might partially succeed
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func restartHotspot(w http.ResponseWriter, r *http.Request) {
+	var config HotspotConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Stop first
+	exec.Command("ip", "netns", "exec", "wifins", "pkill", "-f", "hostapd").Run()
+	exec.Command("ip", "netns", "exec", "wifins", "pkill", "-f", "dnsmasq").Run()
+	time.Sleep(2 * time.Second)
+
+	// Start
+	if err := setupHotspot(config); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func setupHotspot(config HotspotConfig) error {
+	log.Println("Setting up hotspot with config:", config)
+
+	if config.Interface == "" {
+		return fmt.Errorf("wifi interface is required")
+	}
+
+	// Get workspace root directory (parent of webserver dir)
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %v", err)
+	}
+	workspaceRoot := filepath.Dir(wd)
+	scriptPath := filepath.Join(workspaceRoot, "scripts", "hotspot", "init.sh")
+
+	// Build command arguments: SSID PASSWORD CHANNEL SECURITY INTERFACE
+	args := []string{
+		config.SSID,
+		config.Password,
+		config.Channel,
+		config.Security,
+		config.Interface,
+	}
+
+	log.Printf("Executing hotspot script: %s %v", scriptPath, args)
+
+	// Run the script with sudo from the host namespace (both net and mount)
+	cmd := exec.Command("sudo", append([]string{"nsenter", "--target", "1", "--net", "--mount", "bash", scriptPath}, args...)...)
+
+	// Capture output
+	output, err := cmd.CombinedOutput()
+	log.Printf("Script output:\n%s", string(output))
+
+	if err != nil {
+		cmdStr := fmt.Sprintf("sudo nsenter --target 1 --net bash %s %s", scriptPath, strings.Join(args, " "))
+		return fmt.Errorf("failed to setup hotspot\nCommand: %s\nError: %v\nOutput: %s", cmdStr, err, string(output))
+	}
+
+	log.Println("Hotspot setup completed successfully")
+	return nil
 }
