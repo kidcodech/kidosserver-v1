@@ -55,7 +55,7 @@ var (
 	deviceInfoMap       map[string]DeviceInfo   // macAddress -> DeviceInfo
 	blockingMutex       sync.RWMutex
 	captivePortalIP     string
-	kidosIP             string // IP address for kidos domain, loaded from config
+	kidosIP             string // IP address for router.kidos.tools domain, loaded from config
 	domainSyncInterval  = 10 * time.Second
 )
 
@@ -666,7 +666,7 @@ func parseDNSPacket(data []byte) {
 	log.Printf("DNS Query: %s (%s) -> %s [%s/%s] User: %s", ip.SrcIP, srcMAC, domain, queryType, queryClass, userName)
 }
 
-// checkAndParseDNS checks if a DNS query is for a blocked domain or kidos domain
+// checkAndParseDNS checks if a DNS query is for a blocked domain or router.kidos.tools domain
 // Returns (isBlocked/isKidos, domainName, srcMAC, srcIP)
 func checkAndParseDNS(data []byte) (bool, string, string, string, string) {
 	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
@@ -707,10 +707,10 @@ func checkAndParseDNS(data []byte) (bool, string, string, string, string) {
 
 	// Normalize domain: lowercase and remove trailing dot
 	normalizedDomain := strings.TrimSuffix(strings.ToLower(domain), ".")
-	log.Printf("DEBUG: normalizedDomain='%s' (len=%d), comparing to 'kidos'", normalizedDomain, len(normalizedDomain))
+	log.Printf("DEBUG: normalizedDomain='%s' (len=%d), comparing to 'router.kidos.tools'", normalizedDomain, len(normalizedDomain))
 
-	// Check for kidos domain (exact match)
-	if normalizedDomain == "kidos" {
+	// Check for router.kidos.tools domain (exact match)
+	if normalizedDomain == "router.kidos.tools" {
 		log.Printf("KIDOS domain detected: %s - resolving to %s", domain, kidosIP)
 		return true, domain, srcMAC, srcIP, queryType
 	}

@@ -190,7 +190,7 @@ sudo ip netns exec monns ./monitoring/sniffer/sniffer &
 
 ### Access Dashboard
 
-Open browser to: `http://kidos`
+Open browser to: `http://router.kidos.tools`
 
 Dashboard features:
 - Real-time packet statistics and monitoring
@@ -200,7 +200,7 @@ Dashboard features:
 - Live updates via WebSocket
 - Wi-Fi hotspot management
 
-> **Note**: The "kidos" domain name resolves via systemd-resolved configured with `ResolveUnicastSingleLabel=yes`
+> **Note**: The "router.kidos.tools" domain name resolves via systemd-resolved
 
 ### Stop All Services
 

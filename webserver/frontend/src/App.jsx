@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useMediaQuery } from 'react-responsive'
+import { useNavigate, useLocation, Routes, Route } from 'react-router-dom'
 import './App.css'
 import UserManagement from './components/UserManagement'
 
@@ -147,8 +148,30 @@ function TrafficGraph({ data, onWidthChange }) {
 }
 
 function App() {
+  const navigate = useNavigate()
+  const location = useLocation()
   const isMobile = useMediaQuery({ query: '(max-width: 768px)' })
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  
+  // Determine active tab from URL
+  const getActiveTab = () => {
+    const path = location.pathname.replace('/admin/', '')
+    if (path === '' || path === '/') return 'packets'
+    return path
+  }
+  const [activeTab, setActiveTabState] = useState(getActiveTab())
+  
+  // Update activeTab when location changes
+  useEffect(() => {
+    setActiveTabState(getActiveTab())
+  }, [location])
+  
+  // Function to change tab and update URL
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab)
+    navigate(`/admin/${tab}`)
+  }
+  
   const [packets, setPackets] = useState([])
   const [dnsRequests, setDnsRequests] = useState([])
   const [blockedDomains, setBlockedDomains] = useState([])
@@ -164,7 +187,6 @@ function App() {
   })
   const [logFilterType, setLogFilterType] = useState('') // 'user' or 'device'
   const [logFilterValue, setLogFilterValue] = useState('') // user_id or device_mac
-  const [activeTab, setActiveTab] = useState('packets')
   const [logsSubTab, setLogsSubTab] = useState('blocked')
   const [ws, setWs] = useState(null)
   const [trafficHistory, setTrafficHistory] = useState([])
@@ -230,6 +252,9 @@ function App() {
     if (activeTab === 'traffic') {
       fetchPackets()
     }
+    if (activeTab === 'system') {
+      fetchSystemHealth()
+    }
     fetchDNSRequests()
     fetchBlockedDomains()
     fetchClientInfo()
@@ -237,7 +262,7 @@ function App() {
     fetchUnregisteredDevices()
     fetchSystemSettings()
     fetchDoHProviders()
-  }, [])
+  }, [activeTab])
 
   // Auto-refresh based on active tab
   useEffect(() => {
@@ -1003,9 +1028,31 @@ function App() {
             <span className="nav-text">Settings</span>
           </button>
         </nav>
+        {!isMobile && (
+          <div style={{
+            textAlign: 'center',
+            paddingTop: '1rem',
+            paddingBottom: '1rem',
+            borderTop: '1px solid #333'
+          }}>
+            <a 
+              href="/"
+              onClick={() => setIsMobileMenuOpen(false)}
+              style={{
+                color: '#646cff',
+                textDecoration: 'none',
+                fontWeight: 600
+              }}
+              onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+              onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+            >
+              Device Status
+            </a>
+          </div>
+        )}
       </aside>
 
-      <main className="main-content">
+      <main className="main-content" style={isMobile ? { paddingBottom: '80px' } : {}}>
 
       {activeTab === 'traffic' && (
         <>
@@ -2088,6 +2135,34 @@ function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {isMobile && (
+        <div className="mobile-footer" style={{
+          position: 'fixed',
+          bottom: '0 !important',
+          left: 0,
+          right: 0,
+          padding: '1rem 1.5rem',
+          borderTop: '1px solid #2a2a3e',
+          backgroundColor: '#1a1a2e',
+          zIndex: 1001,
+          textAlign: 'center',
+          order: 9999
+        }}>
+          <a 
+            href="/"
+            style={{
+              color: '#646cff',
+              textDecoration: 'none',
+              fontWeight: 600
+            }}
+            onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+            onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+          >
+            Device Status
+          </a>
         </div>
       )}
     </div>

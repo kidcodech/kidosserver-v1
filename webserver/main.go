@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -148,8 +149,25 @@ func main() {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
 
-	// Serve static files on /admin/
-	router.PathPrefix("/admin/").Handler(http.StripPrefix("/admin/", http.FileServer(http.Dir("./frontend/dist"))))
+	// Serve static files on /admin/ with SPA fallback
+	router.PathPrefix("/admin/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Strip /admin prefix
+		path := strings.TrimPrefix(r.URL.Path, "/admin")
+		if path == "" || path == "/" {
+			path = "/index.html"
+		}
+
+		// Check if file exists
+		filePath := "./frontend/dist" + path
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			// File doesn't exist, serve index.html for client-side routing
+			http.ServeFile(w, r, "./frontend/dist/index.html")
+			return
+		}
+
+		// Serve the file
+		http.StripPrefix("/admin/", http.FileServer(http.Dir("./frontend/dist"))).ServeHTTP(w, r)
+	})
 
 	// Wrap router with CORS and captive portal middleware
 	handler := corsMiddleware(captivePortalMiddleware(router))
@@ -224,10 +242,10 @@ func captivePortalMiddleware(next http.Handler) http.Handler {
 			host = host[:colonIndex]
 		}
 
-		// Allow requests to server IP, localhost, kidos domain, and ngrok domains
+		// Allow requests to server IP, localhost, router.kidos.tools domain, and ngrok domains
 		// Also allow if path is already /blocked, or starts with /api, /admin, or /ws
 		// Note: We do NOT allow "/" for unknown hosts, so they get redirected to /blocked
-		if host == serverIP || host == "localhost" || host == "127.0.0.1" || host == "kidos" ||
+		if host == serverIP || host == "localhost" || host == "127.0.0.1" || host == "router.kidos.tools" ||
 			strings.HasSuffix(host, ".ngrok-free.dev") || strings.HasSuffix(host, ".ngrok.io") ||
 			r.URL.Path == "/blocked" ||
 			strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/admin") ||
@@ -239,7 +257,7 @@ func captivePortalMiddleware(next http.Handler) http.Handler {
 		// Unknown host (blocked domain) - redirect to captive portal
 		log.Printf("Captive portal redirect: Host=%s, Path=%s", r.Host, r.URL.Path)
 		// Redirect to absolute URL to change the browser address bar
-		targetURL := fmt.Sprintf("http://kidos/blocked?domain=%s", host)
+		targetURL := fmt.Sprintf("http://router.kidos.tools/blocked?domain=%s", host)
 		http.Redirect(w, r, targetURL, http.StatusFound)
 	})
 }
@@ -755,7 +773,7 @@ func serveBlockedPage(w http.ResponseWriter, r *http.Request) {
         <h1>Access Denied</h1>
         <p>%s has been blocked by Kidos parental controls.</p>
         <div class="dashboard-link">
-            <a href="http://kidos/">Dashboard</a>
+            <a href="http://router.kidos.tools/">Dashboard</a>
         </div>
     </div>
 </body>

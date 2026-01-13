@@ -133,12 +133,12 @@ sudo ./install/start-all.sh
 ```
 
 ### 3. Get WebServer URL
-Clients access the webserver via DNS: `http://kidos/`
+Clients access the webserver via DNS: `http://router.kidos.tools/`
 
 (The DNS inspector resolves "kidos" to the br1 bridge IP)
 
 ### 4. Create Admin User
-Visit `http://kidos/` from any device on your network
+Visit `http://router.kidos.tools/` from any device on your network
 - Go to "Users" tab
 - Click "Add User"
 - Create: username=`john`, password=`password123`, display_name=`John Doe`
@@ -147,10 +147,10 @@ Visit `http://kidos/` from any device on your network
 From a client device on the same network:
 ```bash
 # Visit auth page
-http://kidos/auth
+http://router.kidos.tools/auth
 
 # Or via curl:
-curl -X POST http://kidos/api/auth/register-device \
+curl -X POST http://router.kidos.tools/api/auth/register-device \
   -H "Content-Type: application/json" \
   -d '{"username":"john","password":"password123","device_name":"My Phone"}'
 ```
