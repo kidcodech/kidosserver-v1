@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 // XDP MAC Filter - Allows only registered client MAC addresses
 //
 // This XDP program filters traffic based on source MAC addresses.

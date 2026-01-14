@@ -394,10 +394,6 @@ sudo journalctl -f
 sudo dmesg -w
 ```
 
-## License
-
-MIT
-
 ## Repository
 
 https://github.com/kidcodech/kidosserver-v1
