@@ -2126,6 +2126,149 @@ function App() {
           ) : (
             <div className="no-data">Loading system information...</div>
           )}
+
+          {systemHealth && systemHealth.namespaces && (
+            <>
+              <h3 style={{marginTop: '2rem', marginBottom: '1rem', color: '#888'}}>Network Topology</h3>
+              <div className="network-diagram-container" style={{ padding: '20px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px' }}>
+                <svg width="1050" height="420" viewBox="0 0 1050 420">
+                  <defs>
+                    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                      <path d="M0,0 L0,6 L9,3 z" fill="#666" />
+                    </marker>
+                    <marker id="arrow-start" markerWidth="10" markerHeight="10" refX="0" refY="3" orient="auto" markerUnits="strokeWidth">
+                      <path d="M9,0 L9,6 L0,3 z" fill="#666" />
+                    </marker>
+                  </defs>
+
+                  {/* 1. ethns (Internet) - x=100 (Shifted Right for Badge) */}
+                    <rect x="100" y="20" width="180" height="160" rx="8" fill="#1a1a2e" stroke={systemHealth.namespaces['ethns']?.exists ? '#4cd964' : '#ff3b30'} strokeWidth="2" />
+                    <text x="190" y="45" textAnchor="middle" fill="#fff" fontWeight="bold">Internet Gateway</text>
+                    <text x="190" y="65" textAnchor="middle" fill="#aaa" fontSize="12" fontFamily="monospace">ns: ethns</text>
+                    
+                    {/* IP Field */}
+                    {systemHealth.namespaces['ethns']?.ip_address && (
+                        <>
+                            <rect x="130" y="75" width="120" height="20" rx="4" fill="#000" stroke="#666" strokeWidth="1" />
+                            <text x="190" y="89" textAnchor="middle" fill="#fff" fontSize="10" fontFamily="monospace">
+                                {systemHealth.namespaces['ethns'].ip_address}
+                            </text>
+                        </>
+                    )}
+
+                    <rect x="130" y="105" width="120" height="25" rx="4" fill="rgba(255,255,255,0.05)" stroke="none" />
+                    <text x="190" y="122" textAnchor="middle" fill="#ddd" fontSize="11">br0 / veth-eth</text>
+
+                    {/* Interface Badge (Left Border - "Sticking Out") */}
+                    {/* Main Box starts at 100. Badge Width 80. Overlap ~15px -> x = 100 - 80 + 15 = 35 */}
+                    <rect x="35" y="135" width="80" height="24" rx="4" fill="#2c2c2e" stroke="#00D8FF" strokeWidth="1" style={{filter: 'drop-shadow(2px 2px 2px rgba(0,0,0,0.5))'}} />
+                    <text x="75" y="151" textAnchor="middle" fill="#00D8FF" fontSize="11" fontWeight="bold">
+                        {systemHealth.internet_interface || '?'}
+                    </text>
+
+                  {/* Arrow ethns -> kidosns (280 -> 330) */}
+                  <line x1="280" y1="100" x2="330" y2="100" stroke="#666" strokeWidth="2" markerEnd="url(#arrow)" markerStart="url(#arrow-start)" />
+
+                  {/* 2. kidosns (Core) - x=330 */}
+                    <rect x="330" y="20" width="180" height="160" rx="8" fill="#1a1a2e" stroke={systemHealth.namespaces['kidosns']?.exists ? '#4cd964' : '#ff3b30'} strokeWidth="2" />
+                    <text x="420" y="45" textAnchor="middle" fill="#fff" fontWeight="bold">Core Firewall</text>
+                    <text x="420" y="65" textAnchor="middle" fill="#aaa" fontSize="12" fontFamily="monospace">ns: kidosns</text>
+                    
+                     {/* IP Field */}
+                    {systemHealth.namespaces['kidosns']?.ip_address && (
+                        <>
+                            <rect x="360" y="75" width="120" height="20" rx="4" fill="#000" stroke="#666" strokeWidth="1" />
+                            <text x="420" y="89" textAnchor="middle" fill="#fff" fontSize="10" fontFamily="monospace">
+                                {systemHealth.namespaces['kidosns'].ip_address}
+                            </text>
+                        </>
+                    )}
+
+                    <rect x="345" y="105" width="150" height="25" rx="4" 
+                          fill={systemHealth.namespaces['kidosns']?.xdp ? "rgba(76, 217, 100, 0.2)" : "rgba(255, 59, 48, 0.2)"} 
+                          stroke={systemHealth.namespaces['kidosns']?.xdp ? "#4cd964" : "#ff3b30"} />
+                    <text x="420" y="122" textAnchor="middle" fill={systemHealth.namespaces['kidosns']?.xdp ? "#4cd964" : "#ff3b30"} fontSize="11" fontWeight="bold">
+                        XDP: {systemHealth.namespaces['kidosns']?.xdp ? 'ACTIVE' : 'INACTIVE'}
+                    </text>
+                   
+                  
+                   {/* Arrow kidosns -> switchns (510 -> 560) */}
+                  <line x1="510" y1="100" x2="560" y2="100" stroke="#666" strokeWidth="2" markerEnd="url(#arrow)" markerStart="url(#arrow-start)" />
+
+                  {/* 3. switchns (Switch) - x=560 */}
+                    <rect x="560" y="20" width="180" height="160" rx="8" fill="#1a1a2e" stroke={systemHealth.namespaces['switchns']?.exists ? '#4cd964' : '#ff3b30'} strokeWidth="2" />
+                    <text x="650" y="45" textAnchor="middle" fill="#fff" fontWeight="bold">Switch</text>
+                    <text x="650" y="65" textAnchor="middle" fill="#aaa" fontSize="12" fontFamily="monospace">ns: switchns</text>
+                    
+                    {/* IP Field */}
+                    {systemHealth.namespaces['switchns']?.ip_address && (
+                        <>
+                            <rect x="590" y="75" width="120" height="20" rx="4" fill="#000" stroke="#666" strokeWidth="1" />
+                            <text x="650" y="89" textAnchor="middle" fill="#fff" fontSize="10" fontFamily="monospace">
+                                {systemHealth.namespaces['switchns'].ip_address}
+                            </text>
+                        </>
+                    )}
+
+                  {/* Arrow switchns -> appsns (740 -> 790) */}
+                  <line x1="740" y1="100" x2="790" y2="100" stroke="#666" strokeWidth="2" markerEnd="url(#arrow)" markerStart="url(#arrow-start)" />
+
+                   {/* 4. appsns (Apps) - x=790 */}
+                    <rect x="790" y="20" width="180" height="160" rx="8" fill="#1a1a2e" stroke={systemHealth.namespaces['appsns']?.exists ? '#4cd964' : '#ff3b30'} strokeWidth="2" />
+                    <text x="880" y="45" textAnchor="middle" fill="#fff" fontWeight="bold">Applications</text>
+                    <text x="880" y="65" textAnchor="middle" fill="#aaa" fontSize="12" fontFamily="monospace">ns: appsns</text>
+                    
+                    {/* IP Field */}
+                     {systemHealth.namespaces['appsns']?.ip_address && (
+                        <>
+                            <rect x="820" y="75" width="120" height="20" rx="4" fill="#000" stroke="#666" strokeWidth="1" />
+                            <text x="880" y="89" textAnchor="middle" fill="#fff" fontSize="10" fontFamily="monospace">
+                                {systemHealth.namespaces['appsns'].ip_address}
+                            </text>
+                        </>
+                    )}
+                    
+                    <circle cx="880" cy="115" r="6" fill={systemHealth.namespaces['appsns']?.exists ? '#4cd964' : '#ff3b30'} />
+
+                  {/* 5. wifins (Hotspot) - Below Switch. x=560 */}
+                  {systemHealth.namespaces['wifins']?.exists && (
+                    <>
+                      {/* Vertical line connection 650 -> 650 */}
+                      <line x1="650" y1="180" x2="650" y2="230" stroke="#666" strokeWidth="2" markerEnd="url(#arrow)" markerStart="url(#arrow-start)" />
+                      
+                      <rect x="560" y="230" width="180" height="160" rx="8" fill="#1a1a2e" stroke="#4cd964" strokeWidth="2" style={{filter: 'drop-shadow(0 0 5px rgba(76,217,100,0.3))'}} />
+                      <text x="650" y="255" textAnchor="middle" fill="#fff" fontWeight="bold">Wi-Fi Hotspot</text>
+                      <text x="650" y="275" textAnchor="middle" fill="#aaa" fontSize="12" fontFamily="monospace">ns: wifins</text>
+                      
+                       {/* IP Field */}
+                      {systemHealth.namespaces['wifins']?.ip_address && (
+                        <>
+                            <rect x="590" y="285" width="120" height="20" rx="4" fill="#000" stroke="#666" strokeWidth="1" />
+                            <text x="650" y="299" textAnchor="middle" fill="#fff" fontSize="10" fontFamily="monospace">
+                                {systemHealth.namespaces['wifins'].ip_address}
+                            </text>
+                        </>
+                    )}
+                      
+                      {/* Interface Badge (Right Border - "Sticking Out") */}
+                      {/* Box ends at 560+180=740. Badge Width 80. Overlap ~15px -> x = 740 - 15 = 725 */}
+                      <rect x="725" y="315" width="80" height="24" rx="4" fill="#2c2c2e" stroke="#00D8FF" strokeWidth="1" style={{filter: 'drop-shadow(2px 2px 2px rgba(0,0,0,0.5))'}} />
+                      <text x="765" y="331" textAnchor="middle" fill="#00D8FF" fontSize="11" fontWeight="bold">
+                        {systemHealth.wifi_interface || '?'}
+                      </text>
+                      
+                      <rect x="590" y="330" width="120" height="25" rx="4" 
+                            fill={systemHealth.namespaces['wifins']?.hostapd ? "rgba(76, 217, 100, 0.2)" : "rgba(255, 59, 48, 0.2)"} 
+                            stroke={systemHealth.namespaces['wifins']?.hostapd ? "#4cd964" : "#ff3b30"} />
+                      <text x="650" y="347" textAnchor="middle" fill={systemHealth.namespaces['wifins']?.hostapd ? "#4cd964" : "#ff3b30"} fontSize="11" fontWeight="bold">
+                          {systemHealth.namespaces['wifins']?.hostapd ? 'HOSTAPD RUNNING' : 'STOPPED'}
+                      </text>
+                    </>
+                  )}
+                </svg>
+              </div>
+            </>
+          )}
         </>
       )}
 

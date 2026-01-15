@@ -651,11 +651,143 @@ func getSystemHealth(w http.ResponseWriter, r *http.Request) {
 	_, err = exec.Command("sh", "-c", "ip route | grep default").Output()
 	health["network_online"] = err == nil
 
+	// Get Internet Interface from ethns
+	internetIface := "Unknown"
+	outLink, err := exec.Command("ip", "netns", "exec", "ethns", "ip", "-o", "link", "show").Output()
+	if err == nil {
+		lines := strings.Split(string(outLink), "\n")
+		for _, line := range lines {
+			// Format: "2: eth0: <BROADCAST..."
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				name := strings.TrimRight(parts[1], ":")
+				// Ignore loopback, bridge, and veth interfaces
+				if name != "lo" && name != "br0" && !strings.HasPrefix(name, "veth") {
+					internetIface = name
+					break
+				}
+			}
+		}
+	}
+	health["internet_interface"] = internetIface
+
+	// Get Wi-Fi Interface from wifins
+	wifiIface := "Unknown"
+	// Only check if wifins exists
+	if _, err := os.Stat("/var/run/netns/wifins"); err == nil {
+		outWifi, err := exec.Command("ip", "netns", "exec", "wifins", "ip", "-o", "link", "show").Output()
+		if err == nil {
+			lines := strings.Split(string(outWifi), "\n")
+			for _, line := range lines {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					name := strings.TrimRight(parts[1], ":")
+					// Clean up name if it contains @ (e.g., phy0@...)
+					if idx := strings.Index(name, "@"); idx != -1 {
+						name = name[:idx]
+					}
+					// Ignore loopback and veth interfaces
+					if name != "lo" && !strings.HasPrefix(name, "veth") && !strings.HasPrefix(name, "br") {
+						wifiIface = name
+						break
+					}
+				}
+			}
+		}
+	}
+	health["wifi_interface"] = wifiIface
+
 	// Uptime
 	uptime, err := exec.Command("sh", "-c", "uptime -p").Output()
 	if err == nil {
 		health["uptime"] = strings.TrimSpace(string(uptime))
 	}
+
+	// Namespace Health
+	namespaces := map[string]interface{}{}
+	requiredNS := []string{"kidosns", "ethns", "switchns", "appsns", "monns", "wifins"}
+
+	// Helper to get IP
+	getIP := func(ns, dev string) string {
+		out, err := exec.Command("ip", "netns", "exec", ns, "ip", "-o", "-4", "addr", "show", dev).Output()
+		if err != nil {
+			return ""
+		}
+		fields := strings.Fields(string(out))
+		for i, field := range fields {
+			if field == "inet" && i+1 < len(fields) {
+				// Return IP part before /CIDR if present, though -o usually gives just IP/CIDR string
+				ipCIDR := fields[i+1]
+				if idx := strings.Index(ipCIDR, "/"); idx != -1 {
+					return ipCIDR[:idx]
+				}
+				return ipCIDR
+			}
+		}
+		return ""
+	}
+
+	for _, ns := range requiredNS {
+		exists := false
+		// Check existence (ip netns list returns output)
+		out, err := exec.Command("ip", "netns", "list").Output()
+		if err == nil && strings.Contains(string(out), ns) {
+			exists = true
+		} else {
+			// Fallback check
+			if _, err := os.Stat("/var/run/netns/" + ns); err == nil {
+				exists = true
+			}
+		}
+
+		nsStatus := map[string]interface{}{
+			"exists": exists,
+		}
+
+		if exists {
+			nsStatus["status"] = "Active"
+			nsStatus["ip_address"] = "" // Default empty
+
+			if ns == "ethns" {
+				nsStatus["ip_address"] = getIP(ns, "br0")
+			} else if ns == "kidosns" {
+				// Check XDP
+				xdpAttached := false
+				out, err := exec.Command("ip", "netns", "exec", "kidosns", "ip", "link", "show", "veth-kidos-app").Output()
+				if err == nil && strings.Contains(string(out), "xdp") {
+					xdpAttached = true
+				}
+				nsStatus["xdp"] = xdpAttached
+
+				// Get IP
+				br1IP := getIP(ns, "br1")
+				nsStatus["bridge_ip"] = br1IP // Keep for backward compat
+				nsStatus["ip_address"] = br1IP
+			} else if ns == "switchns" {
+				swIP := getIP(ns, "br-switch")
+				nsStatus["bridge_ip"] = swIP // Keep for backward compat
+				nsStatus["ip_address"] = swIP
+			} else if ns == "appsns" {
+				nsStatus["ip_address"] = getIP(ns, "veth-app")
+			} else if ns == "wifins" {
+				// Check hostapd
+				hostapdRunning := false
+				out, err := exec.Command("ip", "netns", "exec", "wifins", "pgrep", "hostapd").Output()
+				if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+					hostapdRunning = true
+				}
+				nsStatus["hostapd"] = hostapdRunning
+
+				// Get Bridge IP
+				nsStatus["ip_address"] = getIP(ns, "br-wifi")
+			}
+		} else {
+			nsStatus["status"] = "Missing"
+		}
+
+		namespaces[ns] = nsStatus
+	}
+	health["namespaces"] = namespaces
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
