@@ -37,36 +37,108 @@ fi
 
 echo "Found interfaces: $ALL_ETH_INTERFACES"
 
-# Test each interface for internet connectivity
+# Test each interface for internet connectivity and detect active ones
 INTERNET_IFACES=()
 NO_INTERNET_IFACES=()
+ACTIVE_IFACE=""
+ACTIVE_IP=""
 
 for iface in $ALL_ETH_INTERFACES; do
     echo "Testing connectivity on $iface..."
     ip link set "$iface" up
-    sleep 2
+    sleep 1
     
-    # Try to get DHCP and test connectivity
-    pkill -f "dhclient.*$iface" 2>/dev/null || true
-    timeout 10 dhclient "$iface" 2>/dev/null
-    
-    # Test with ping
-    if timeout 3 ping -c 1 -I "$iface" 8.8.8.8 >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ $iface has internet connectivity${NC}"
-        INTERNET_IFACES+=("$iface")
-    else
-        echo -e "${YELLOW}✗ $iface has no internet connectivity${NC}"
-        NO_INTERNET_IFACES+=("$iface")
+    # Check if interface already has an IP (active SSH connection)
+    ACTIVE_IP=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | head -n1)
+    if [ -n "$ACTIVE_IP" ]; then
+        # Test if this active interface has internet
+        if timeout 3 ping -c 1 -I "$iface" 8.8.8.8 >/dev/null 2>&1; then
+            echo -e "${GREEN}✓ $iface has internet connectivity (ACTIVE - IP: $ACTIVE_IP)${NC}"
+            ACTIVE_IFACE="$iface"
+            continue  # Skip to next interface, will handle this specially
+        else
+            echo -e "${YELLOW}✗ $iface has IP but no internet${NC}"
+        fi
     fi
     
-    # Release DHCP for now
-    pkill -f "dhclient.*$iface" 2>/dev/null || true
-    ip addr flush dev "$iface"
+    # For interfaces without IP, test with temporary DHCP
+    if [ -z "$ACTIVE_IP" ]; then
+        pkill -f "dhclient.*$iface" 2>/dev/null || true
+        timeout 10 dhclient "$iface" 2>/dev/null
+        
+        # Test with ping
+        if timeout 3 ping -c 1 -I "$iface" 8.8.8.8 >/dev/null 2>&1; then
+            echo -e "${GREEN}✓ $iface has internet connectivity${NC}"
+            INTERNET_IFACES+=("$iface")
+        else
+            echo -e "${YELLOW}✗ $iface has no internet connectivity${NC}"
+            NO_INTERNET_IFACES+=("$iface")
+        fi
+        
+        # Release DHCP for now
+        pkill -f "dhclient.*$iface" 2>/dev/null || true
+        ip addr flush dev "$iface"
+    fi
 done
 
 # Setup based on connectivity results
-if [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
-    echo "Setting up ethns namespace with internet-connected interfaces..."
+if [ -n "$ACTIVE_IFACE" ]; then
+    echo "Active interface $ACTIVE_IFACE detected - using bridge mode to preserve connectivity..."
+    ip netns add ethns
+    
+    # Create bridge in root namespace
+    ip link add name br-host type bridge
+    ip link set br-host up
+    
+    # Kill dhclient and remove IP from physical interface before adding to bridge
+    echo "Removing IP from $ACTIVE_IFACE (will be assigned to bridge instead)..."
+    pkill -f "dhclient.*$ACTIVE_IFACE" 2>/dev/null || true
+    sleep 1
+    ip addr del "$ACTIVE_IP" dev "$ACTIVE_IFACE" 2>/dev/null || true
+    
+    # Connect physical interface to bridge (keep it in root namespace)
+    ip link set "$ACTIVE_IFACE" master br-host
+    ip link set "$ACTIVE_IFACE" up
+    
+    # Get/restore IP for root namespace on bridge
+    echo "Requesting IP for root namespace bridge..."
+    dhclient -v -pf /var/run/dhclient-root.pid br-host
+    
+    # Create bridge in ethns
+    echo "Creating bridge in ethns..."
+    ip netns exec ethns ip link add name br0 type bridge
+    ip netns exec ethns ip link set br0 up
+    ip netns exec ethns ip link set lo up
+    
+    # Create veth pair between root and ethns
+    echo "Creating veth pair between root and ethns..."
+    ip link add veth-root type veth peer name veth-eth
+    ip link set veth-root master br-host
+    ip link set veth-root up
+    ip link set veth-eth netns ethns
+    ip netns exec ethns ip link set veth-eth master br0
+    ip netns exec ethns ip link set veth-eth up
+    
+    # Get DHCP for ethns bridge (same subnet as root)
+    echo "Requesting IP for ethns bridge..."
+    ip netns exec ethns dhclient -v -pf /var/run/dhclient-ethns.pid br0
+    
+    # Create veth pair to connect ethns and kidosns
+    echo "Creating veth pair between ethns and kidosns..."
+    ip netns exec ethns ip link add veth-eth-kidos type veth peer name veth-kidos netns kidosns
+    ip netns exec ethns ip link set veth-eth-kidos master br0
+    ip netns exec ethns ip link set veth-eth-kidos up
+    ip netns exec kidosns ip link set veth-kidos up
+    
+    # Setup DNS for ethns
+    mkdir -p /etc/netns/ethns
+    echo "nameserver 8.8.8.8" > /etc/netns/ethns/resolv.conf
+    echo "hosts: files dns" > /etc/netns/ethns/nsswitch.conf
+    
+    echo -e "${GREEN}✓ Bridge mode configured - all namespaces on same subnet${NC}"
+    
+elif [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
+    echo "Setting up ethns namespace with internet-connected interfaces (moving to namespace)..."
     ip netns add ethns
     
     # Create bridge in ethernet namespace
@@ -81,9 +153,6 @@ if [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
         echo -e "${GREEN}✓ $iface added to ethns bridge${NC}"
     done
     
-    # Bring up bridge
-    ip netns exec ethns ip link set br0 up
-
     # Bring up bridge
     ip netns exec ethns ip link set br0 up
     
@@ -144,7 +213,7 @@ ip netns exec switchns ip link set veth-sw-app2 master br-switch
 
 # Bring up the interfaces
 echo "Bringing up interfaces..."
-if [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
+if [ -n "$ACTIVE_IFACE" ] || [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
     ip netns exec ethns ip link set br0 up
     ip netns exec kidosns ip link set veth-kidos up
 fi
@@ -216,13 +285,14 @@ sleep 2
 # Smart IP management: DHCP-then-static with fallback
 IP_CONFIG_FILE="/tmp/kidos-network.conf"
 
-# Run DHCP on ethernet bridge (only if ethns exists)
+# Run DHCP on ethernet bridge (only if ethns exists and not using active interface bridge mode)
 if [ ${#INTERNET_IFACES[@]} -gt 0 ]; then
     echo "Requesting IP address via DHCP on ethernet bridge..."
     ip netns exec ethns pkill dhclient 2>/dev/null || true
     sleep 1
     ip netns exec ethns dhclient br0
 fi
+# Note: If ACTIVE_IFACE is set, DHCP was already done during bridge setup above
 
 # Smart IP assignment for kidos bridge
 echo "Configuring IP for kidos bridge..."

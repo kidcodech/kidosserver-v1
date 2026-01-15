@@ -4,12 +4,45 @@
 echo "Tearing down monitoring namespace..."
 ./scripts/monitoring/teardown.sh
 
+# Check if br-host exists (bridge mode was used for active interface)
+if ip link show br-host >/dev/null 2>&1; then
+    echo "Detected br-host bridge, restoring bridge mode configuration..."
+    
+    # Get the physical interface from the bridge
+    BRIDGE_MEMBER=$(ip link show master br-host | grep -E '^[0-9]+: (en|eth)' | awk -F': ' '{print $2}' | awk '{print $1}' | head -n1)
+    
+    if [ -n "$BRIDGE_MEMBER" ]; then
+        echo "Found physical interface: $BRIDGE_MEMBER"
+        
+        # Kill dhclient on bridge
+        pkill -f "dhclient.*br-host" 2>/dev/null || true
+        rm -f /var/run/dhclient-root.pid
+        
+        # Remove physical interface from bridge
+        echo "Removing $BRIDGE_MEMBER from bridge..."
+        ip link set "$BRIDGE_MEMBER" nomaster
+        
+        # Delete bridge
+        echo "Deleting br-host bridge..."
+        ip link set br-host down 2>/dev/null || true
+        ip link del br-host 2>/dev/null || true
+        
+        # Delete veth-root if it exists
+        ip link del veth-root 2>/dev/null || true
+        
+        # Restore internet on physical interface
+        echo "Restoring DHCP on $BRIDGE_MEMBER..."
+        dhclient "$BRIDGE_MEMBER" 2>/dev/null &
+    fi
+fi
+
 # Discover all network namespaces starting with ethns
 ALL_ETHNS=$(ip netns list | grep -E '^ethns[0-9]*' | awk '{print $1}')
 
 # Kill dhclient processes in all namespaces
 echo "Stopping DHCP clients..."
 ip netns exec ethns pkill dhclient 2>/dev/null || true
+rm -f /var/run/dhclient-ethns.pid
 for ns in $ALL_ETHNS; do
     if [ "$ns" != "ethns" ]; then
         ip netns exec "$ns" pkill dhclient 2>/dev/null || true
