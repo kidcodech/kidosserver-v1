@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"html"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -22,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -167,6 +169,7 @@ func main() {
 	router.HandleFunc("/api/hotspot/restart", restartHotspot).Methods("POST")
 
 	router.HandleFunc("/ws", handleWebSocket)
+	router.HandleFunc("/console", handleConsoleWebSocket)
 
 	// Captive portal page for blocked domains
 	router.HandleFunc("/blocked", serveBlockedPage).Methods("GET")
@@ -1135,6 +1138,385 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			clientsMu.Unlock()
 			break
 		}
+	}
+}
+
+// handleConsoleWebSocket handles console command execution via WebSocket
+func handleConsoleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("Console WebSocket upgrade error:", err)
+		return
+	}
+	defer conn.Close()
+
+	log.Println("New console WebSocket client connected")
+
+	// Start a persistent bash shell
+	var shellCmd *exec.Cmd
+	var shellStdin io.WriteCloser
+	var shellStdout, shellStderr io.ReadCloser
+	var shellMu sync.Mutex
+	var currentNamespace string = "root"
+
+	startShell := func(namespace string) error {
+		shellMu.Lock()
+		defer shellMu.Unlock()
+
+		// Kill existing shell if any
+		if shellCmd != nil && shellCmd.Process != nil {
+			shellCmd.Process.Kill()
+		}
+
+		// Start new shell in the specified namespace
+		if namespace == "" || namespace == "root" {
+			shellCmd = exec.Command("nsenter", "-t", "1", "-n", "-m", "bash")
+		} else {
+			shellCmd = exec.Command("ip", "netns", "exec", namespace, "bash")
+		}
+
+		shellCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+		var err error
+		shellStdin, err = shellCmd.StdinPipe()
+		if err != nil {
+			return err
+		}
+
+		shellStdout, err = shellCmd.StdoutPipe()
+		if err != nil {
+			return err
+		}
+
+		shellStderr, err = shellCmd.StderrPipe()
+		if err != nil {
+			return err
+		}
+
+		if err := shellCmd.Start(); err != nil {
+			return err
+		}
+
+		// Start output readers
+		go func() {
+			scanner := bufio.NewScanner(shellStdout)
+			var capturingPwd bool
+			var pwdBuffer string
+			
+			for scanner.Scan() {
+				line := scanner.Text()
+				
+				// Check for PWD capture markers
+				if line == "__PWD_START__" {
+					capturingPwd = true
+					continue
+				}
+				
+				if line == "__PWD_END__" {
+					if pwdBuffer != "" {
+						sendConsoleCWD(conn, pwdBuffer)
+						pwdBuffer = ""
+					}
+					capturingPwd = false
+					continue
+				}
+				
+				// Capture pwd output between markers
+				if capturingPwd {
+					pwdBuffer = line
+					continue
+				}
+				
+				// Check for completion marker
+				if strings.HasPrefix(line, "__CONSOLE_DONE__") {
+					exitCode := strings.TrimPrefix(line, "__CONSOLE_DONE__")
+					if exitCode != "0" {
+						sendConsoleExit(conn, 1)
+					} else {
+						sendConsoleExit(conn, 0)
+					}
+					continue
+				}
+				
+				sendConsoleOutput(conn, line)
+			}
+		}()
+
+		go func() {
+			scanner := bufio.NewScanner(shellStderr)
+			for scanner.Scan() {
+				sendConsoleError(conn, scanner.Text())
+			}
+		}()
+
+		currentNamespace = namespace
+		return nil
+	}
+
+	// Start initial shell
+	if err := startShell("root"); err != nil {
+		sendConsoleError(conn, fmt.Sprintf("Failed to start shell: %v", err))
+		return
+	}
+	defer func() {
+		if shellCmd != nil && shellCmd.Process != nil {
+			shellCmd.Process.Kill()
+		}
+	}()
+
+	// Goroutine to handle incoming messages
+	messageChan := make(chan struct {
+		Command      string `json:"command"`
+		Namespace    string `json:"namespace"`
+		Autocomplete string `json:"autocomplete"`
+		CWD          string `json:"cwd"`
+		Kill         bool   `json:"kill"`
+	})
+
+	go func() {
+		for {
+			var msg struct {
+				Command      string `json:"command"`
+				Namespace    string `json:"namespace"`
+				Autocomplete string `json:"autocomplete"`
+				CWD          string `json:"cwd"`
+				Kill         bool   `json:"kill"`
+			}
+			err := conn.ReadJSON(&msg)
+			if err != nil {
+				log.Println("Console WebSocket read error:", err)
+				close(messageChan)
+				return
+			}
+			messageChan <- msg
+		}
+	}()
+
+	for msg := range messageChan {
+		log.Printf("Received console message: command=%q, autocomplete=%q, namespace=%q, cwd=%q, kill=%v", 
+			msg.Command, msg.Autocomplete, msg.Namespace, msg.CWD, msg.Kill)
+		
+		// Handle autocomplete request
+		if msg.Autocomplete != "" {
+			log.Printf("Processing autocomplete for: %q", msg.Autocomplete)
+			suggestions := getAutocomplete(msg.Autocomplete, msg.Namespace, msg.CWD)
+			sendConsoleAutocomplete(conn, suggestions)
+			continue
+		}
+
+		// Handle kill signal (Ctrl+C)
+		if msg.Kill {
+			shellMu.Lock()
+			if shellCmd != nil && shellCmd.Process != nil {
+				log.Printf("Killing process group: %d", shellCmd.Process.Pid)
+				syscall.Kill(-shellCmd.Process.Pid, syscall.SIGINT)
+			}
+			shellMu.Unlock()
+			continue
+		}
+
+		if msg.Command == "" {
+			continue
+		}
+
+		// Check if namespace changed
+		if msg.Namespace != currentNamespace {
+			sendConsoleOutput(conn, fmt.Sprintf("Switching to namespace: %s", msg.Namespace))
+			if err := startShell(msg.Namespace); err != nil {
+				sendConsoleError(conn, fmt.Sprintf("Failed to switch namespace: %v", err))
+				continue
+			}
+		}
+
+		log.Printf("Executing command in namespace '%s': %s", msg.Namespace, msg.Command)
+
+		// Send command to persistent shell
+		shellMu.Lock()
+		if shellStdin != nil {
+			// Write command with newline
+			fmt.Fprintf(shellStdin, "%s\n", msg.Command)
+			// Get current directory after command with markers
+			fmt.Fprintf(shellStdin, "echo __PWD_START__\n")
+			fmt.Fprintf(shellStdin, "pwd\n")
+			fmt.Fprintf(shellStdin, "echo __PWD_END__\n")
+			fmt.Fprintf(shellStdin, "echo __CONSOLE_DONE__$?\n")
+		}
+		shellMu.Unlock()
+	}
+}
+
+func sendConsoleCWD(conn *websocket.Conn, cwd string) {
+	msg := map[string]interface{}{
+		"type": "cwd",
+		"data": cwd,
+	}
+	if err := conn.WriteJSON(msg); err != nil {
+		log.Printf("Failed to send cwd: %v", err)
+	}
+}
+
+func sendConsoleOutput(conn *websocket.Conn, text string) {
+	msg := map[string]interface{}{
+		"type": "output",
+		"data": text,
+	}
+	if err := conn.WriteJSON(msg); err != nil {
+		log.Printf("Failed to send console output: %v", err)
+	}
+}
+
+func sendConsoleError(conn *websocket.Conn, text string) {
+	msg := map[string]interface{}{
+		"type": "error",
+		"data": text,
+	}
+	if err := conn.WriteJSON(msg); err != nil {
+		log.Printf("Failed to send console error: %v", err)
+	}
+}
+
+func sendConsoleExit(conn *websocket.Conn, code int) {
+	msg := map[string]interface{}{
+		"type": "exit",
+		"code": code,
+	}
+	if err := conn.WriteJSON(msg); err != nil {
+		log.Printf("Failed to send console exit: %v", err)
+	}
+}
+
+func sendConsoleAutocomplete(conn *websocket.Conn, data map[string]interface{}) {
+	msg := map[string]interface{}{
+		"type": "autocomplete",
+		"data": data,
+	}
+	if err := conn.WriteJSON(msg); err != nil {
+		log.Printf("Failed to send autocomplete: %v", err)
+	}
+}
+
+func getAutocomplete(input string, namespace string, cwd string) map[string]interface{} {
+	log.Printf("Autocomplete request: input=%q, namespace=%q, cwd=%q", input, namespace, cwd)
+	
+	// Handle empty or tilde in cwd - use /root as fallback
+	if cwd == "" || cwd == "~" {
+		cwd = "/root"
+	}
+	
+	// Use bash's native completion system
+	compScript := fmt.Sprintf(`
+		# Change to the working directory
+		cd %q 2>/dev/null || cd / || true
+		
+		# Source bash completion
+		if [ -f /usr/share/bash-completion/bash_completion ]; then
+			source /usr/share/bash-completion/bash_completion 2>/dev/null
+		elif [ -f /etc/bash_completion ]; then
+			source /etc/bash_completion 2>/dev/null
+		fi
+		
+		# Set up completion environment
+		COMP_LINE=%q
+		COMP_POINT=${#COMP_LINE}
+		
+		# Parse into words properly (handles quotes, escapes, etc.)
+		eval "COMP_WORDS=($COMP_LINE)"
+		COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
+		
+		# Get current word being completed
+		if [[ "$COMP_LINE" =~ [[:space:]]$ ]]; then
+			COMP_CWORD=$((COMP_CWORD + 1))
+			COMP_WORDS+=("")
+		fi
+		
+		# Try to find and execute completion function for the command
+		COMPREPLY=()
+		COMMAND="${COMP_WORDS[0]}"
+		
+		# Load completion for this command if available
+		_completion_loader "$COMMAND" 2>/dev/null || true
+		
+		# Try to get the completion function
+		COMP_FUNC=$(complete -p "$COMMAND" 2>/dev/null | sed 's/.*-F \([^ ]*\).*/\1/')
+		
+		if [ -n "$COMP_FUNC" ] && declare -F "$COMP_FUNC" >/dev/null 2>&1; then
+			# Execute the completion function with proper argument handling
+			if [ $COMP_CWORD -eq 0 ]; then
+				# First word - no previous word
+				$COMP_FUNC "$COMMAND" "${COMP_WORDS[COMP_CWORD]}" "" 2>/dev/null || true
+			else
+				$COMP_FUNC "$COMMAND" "${COMP_WORDS[COMP_CWORD]}" "${COMP_WORDS[COMP_CWORD-1]}" 2>/dev/null || true
+			fi
+		fi
+		
+		# If COMPREPLY is still empty, use fallback
+		if [ ${#COMPREPLY[@]} -eq 0 ]; then
+			CUR="${COMP_WORDS[COMP_CWORD]}"
+			if [ $COMP_CWORD -eq 0 ]; then
+				# First word - complete commands
+				COMPREPLY=($(compgen -c "$CUR"))
+			else
+				# Other words - complete files and commands
+				COMPREPLY=($(compgen -f -c "$CUR"))
+			fi
+		fi
+		
+		# Print results
+		printf '%%s\n' "${COMPREPLY[@]}"
+	`, cwd, input)
+	
+	var cmd *exec.Cmd
+	if namespace == "" || namespace == "root" {
+		cmd = exec.Command("nsenter", "-t", "1", "-n", "-m", "bash", "-c", compScript)
+	} else {
+		cmd = exec.Command("ip", "netns", "exec", namespace, "bash", "-c", compScript)
+	}
+	
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("Autocomplete command failed: %v, stderr: %s", err, err.Error())
+		return map[string]interface{}{
+			"completions": []string{},
+			"prefix":      input,
+		}
+	}
+	
+	log.Printf("Autocomplete raw output: %q (length: %d bytes)", string(output), len(output))
+	
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	log.Printf("Autocomplete split into %d lines", len(lines))
+	// Filter empty lines
+	var filtered []string
+	for _, line := range lines {
+		if line != "" {
+			filtered = append(filtered, line)
+		}
+	}
+	
+	log.Printf("Autocomplete filtered: %d completions: %v", len(filtered), filtered)
+	
+	// Limit to 50 suggestions
+	if len(filtered) > 50 {
+		filtered = filtered[:50]
+	}
+	
+	// Ensure we return an empty array instead of null
+	if filtered == nil {
+		filtered = []string{}
+	}
+	
+	// Find the prefix (everything up to the last word)
+	lastSpaceIdx := strings.LastIndex(input, " ")
+	prefix := ""
+	if lastSpaceIdx >= 0 {
+		prefix = input[:lastSpaceIdx+1]
+	}
+	
+	log.Printf("Autocomplete returning: %d completions, prefix=%q", len(filtered), prefix)
+	
+	return map[string]interface{}{
+		"completions": filtered,
+		"prefix":      prefix,
 	}
 }
 

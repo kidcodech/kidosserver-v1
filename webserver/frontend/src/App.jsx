@@ -3,6 +3,7 @@ import { useMediaQuery } from 'react-responsive'
 import { useNavigate, useLocation, Routes, Route } from 'react-router-dom'
 import './App.css'
 import UserManagement from './components/UserManagement'
+import Console from './components/Console'
 
 // Helper function to format bytes
 const formatBytes = (bytes) => {
@@ -2267,6 +2268,9 @@ function App() {
                   )}
                 </svg>
               </div>
+
+              {/* Console Component */}
+              <Console />
             </>
           )}
         </>
