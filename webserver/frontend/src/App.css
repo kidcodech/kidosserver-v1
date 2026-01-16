@@ -6,14 +6,15 @@
 
 body {
   min-height: 100vh;
-  overflow-x: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .App {
   display: flex;
   min-height: 100vh;
   height: 100vh;
-  width: 100%;
+  min-width: 1160px; /* sidebar 260px + main-content 900px */
 }
 
 /* Sidebar */
@@ -148,10 +149,30 @@ body {
   padding: 2rem;
   background: #0f0f1e;
   min-height: 100vh;
+  max-height: 100vh;
+  min-width: 900px;
   width: calc(100% - 260px);
-  max-width: 100%;
   box-sizing: border-box;
-  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.main-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.main-content::-webkit-scrollbar-track {
+  background: #1a1a1a;
+  border-radius: 4px;
+}
+
+.main-content::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+  border: 2px solid #1a1a1a;
+}
+
+.main-content::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
 }
 
 .header {
@@ -428,12 +449,13 @@ body {
 /* Custom scrollbar for user lists */
 .users-list::-webkit-scrollbar,
 .user-blocked-domains::-webkit-scrollbar {
-  width: 10px;
+  width: 8px;
 }
 
 .users-list::-webkit-scrollbar-track,
 .user-blocked-domains::-webkit-scrollbar-track {
-  background: transparent;
+  background: #1a1a1a;
+  border-radius: 4px;
 }
 
 .users-list::-webkit-scrollbar-thumb,
@@ -445,7 +467,7 @@ body {
 
 .users-list::-webkit-scrollbar-thumb:hover,
 .user-blocked-domains::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #6b7280;
 }
 
 .packet-table thead {
@@ -734,6 +756,25 @@ body {
   flex-direction: column;
   gap: 1rem;
   padding-right: 0.5rem;
+}
+
+.user-cards::-webkit-scrollbar {
+  width: 8px;
+}
+
+.user-cards::-webkit-scrollbar-track {
+  background: #1a1a1a;
+  border-radius: 4px;
+}
+
+.user-cards::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+  border: 2px solid #1a1a1a;
+}
+
+.user-cards::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
 }
 
 .user-card {
@@ -1106,6 +1147,7 @@ input:checked + .slider:before {
     margin-left: 0;
     padding: 0.5rem;
     width: 100%;
+    min-width: 0 !important;
     min-height: calc(100vh - 80px); /* approximte header height */
   }
 
