@@ -1202,16 +1202,16 @@ func handleConsoleWebSocket(w http.ResponseWriter, r *http.Request) {
 			scanner := bufio.NewScanner(shellStdout)
 			var capturingPwd bool
 			var pwdBuffer string
-			
+
 			for scanner.Scan() {
 				line := scanner.Text()
-				
+
 				// Check for PWD capture markers
 				if line == "__PWD_START__" {
 					capturingPwd = true
 					continue
 				}
-				
+
 				if line == "__PWD_END__" {
 					if pwdBuffer != "" {
 						sendConsoleCWD(conn, pwdBuffer)
@@ -1220,13 +1220,13 @@ func handleConsoleWebSocket(w http.ResponseWriter, r *http.Request) {
 					capturingPwd = false
 					continue
 				}
-				
+
 				// Capture pwd output between markers
 				if capturingPwd {
 					pwdBuffer = line
 					continue
 				}
-				
+
 				// Check for completion marker
 				if strings.HasPrefix(line, "__CONSOLE_DONE__") {
 					exitCode := strings.TrimPrefix(line, "__CONSOLE_DONE__")
@@ -1237,7 +1237,7 @@ func handleConsoleWebSocket(w http.ResponseWriter, r *http.Request) {
 					}
 					continue
 				}
-				
+
 				sendConsoleOutput(conn, line)
 			}
 		}()
@@ -1293,9 +1293,9 @@ func handleConsoleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	for msg := range messageChan {
-		log.Printf("Received console message: command=%q, autocomplete=%q, namespace=%q, cwd=%q, kill=%v", 
+		log.Printf("Received console message: command=%q, autocomplete=%q, namespace=%q, cwd=%q, kill=%v",
 			msg.Command, msg.Autocomplete, msg.Namespace, msg.CWD, msg.Kill)
-		
+
 		// Handle autocomplete request
 		if msg.Autocomplete != "" {
 			log.Printf("Processing autocomplete for: %q", msg.Autocomplete)
@@ -1397,12 +1397,12 @@ func sendConsoleAutocomplete(conn *websocket.Conn, data map[string]interface{}) 
 
 func getAutocomplete(input string, namespace string, cwd string) map[string]interface{} {
 	log.Printf("Autocomplete request: input=%q, namespace=%q, cwd=%q", input, namespace, cwd)
-	
+
 	// Handle empty or tilde in cwd - use /root as fallback
 	if cwd == "" || cwd == "~" {
 		cwd = "/root"
 	}
-	
+
 	// Use bash's native completion system
 	compScript := fmt.Sprintf(`
 		# Change to the working directory
@@ -1464,14 +1464,14 @@ func getAutocomplete(input string, namespace string, cwd string) map[string]inte
 		# Print results
 		printf '%%s\n' "${COMPREPLY[@]}"
 	`, cwd, input)
-	
+
 	var cmd *exec.Cmd
 	if namespace == "" || namespace == "root" {
 		cmd = exec.Command("nsenter", "-t", "1", "-n", "-m", "bash", "-c", compScript)
 	} else {
 		cmd = exec.Command("ip", "netns", "exec", namespace, "bash", "-c", compScript)
 	}
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		log.Printf("Autocomplete command failed: %v, stderr: %s", err, err.Error())
@@ -1480,9 +1480,9 @@ func getAutocomplete(input string, namespace string, cwd string) map[string]inte
 			"prefix":      input,
 		}
 	}
-	
+
 	log.Printf("Autocomplete raw output: %q (length: %d bytes)", string(output), len(output))
-	
+
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	log.Printf("Autocomplete split into %d lines", len(lines))
 	// Filter empty lines
@@ -1492,28 +1492,28 @@ func getAutocomplete(input string, namespace string, cwd string) map[string]inte
 			filtered = append(filtered, line)
 		}
 	}
-	
+
 	log.Printf("Autocomplete filtered: %d completions: %v", len(filtered), filtered)
-	
+
 	// Limit to 50 suggestions
 	if len(filtered) > 50 {
 		filtered = filtered[:50]
 	}
-	
+
 	// Ensure we return an empty array instead of null
 	if filtered == nil {
 		filtered = []string{}
 	}
-	
+
 	// Find the prefix (everything up to the last word)
 	lastSpaceIdx := strings.LastIndex(input, " ")
 	prefix := ""
 	if lastSpaceIdx >= 0 {
 		prefix = input[:lastSpaceIdx+1]
 	}
-	
+
 	log.Printf("Autocomplete returning: %d completions, prefix=%q", len(filtered), prefix)
-	
+
 	return map[string]interface{}{
 		"completions": filtered,
 		"prefix":      prefix,
