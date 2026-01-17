@@ -21,12 +21,13 @@ struct mac_addr {
     __u8 addr[6];
 };
 
-// Structure to store MAC + IP address info (packed to avoid alignment issues)
+// Structure to store MAC + IP address info
 struct device_info {
     __u8 mac[6];
+    __u16 padding; // Pad 2 bytes so IP starts at offset 8 (aligned)
     __u32 ip;
     __u64 count;
-} __attribute__((packed));
+}; // Removed packed attribute for better performance/compatibility
 
 // Map to store allowed client MAC addresses
 // Key: MAC address (6 bytes)
@@ -59,8 +60,8 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_XSKMAP);
     __uint(max_entries, 64);
-    __type(key, __u32);
-    __type(value, __u32);
+    __uint(key_size, sizeof(__u32));    // Explicitly set to 4
+    __uint(value_size, sizeof(__u32));  // Explicitly set to 4
 } xsks_map SEC(".maps");
 
 // Global settings map

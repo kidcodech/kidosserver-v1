@@ -78,8 +78,8 @@ echo "[2/4] Loading combined XDP program (IP filter + DNS inspector)..."
 # Remove any existing XDP programs first
 ip netns exec kidosns ip link set veth-kidos-app xdp off 2>/dev/null || true
 ip netns exec kidosns ip link set veth-kidos-app xdpgeneric off 2>/dev/null || true
-# Load combined IP filter XDP (includes xsks_map for DNS)
-ip netns exec kidosns ip link set veth-kidos-app xdp obj "$PROJECT_ROOT/parental/ip-filter/xdp_ip_filter.o" sec xdp
+# Load combined IP filter XDP (includes xsks_map for DNS) in GENERIC mode (SKB) for Pi compatibility
+ip netns exec kidosns ip link set veth-kidos-app xdpgeneric obj "$PROJECT_ROOT/parental/ip-filter/xdp_ip_filter.o" sec xdp
 echo "✓ Combined XDP program loaded"
 echo ""
 
