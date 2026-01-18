@@ -13,7 +13,7 @@ dnf update -y
 
 # Install network utilities (usually already installed)
 echo "Installing network utilities..."
-dnf install -y iproute dhcp-client
+dnf install -y iproute dhcp-client libpcap-devel
 
 # Install eBPF/XDP dependencies
 echo "Installing eBPF/XDP tools..."
