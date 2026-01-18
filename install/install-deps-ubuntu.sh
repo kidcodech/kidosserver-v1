@@ -13,7 +13,7 @@ apt-get update -y
 
 # Install network utilities (usually already installed)
 echo "Installing network utilities..."
-apt-get install -y iproute2 isc-dhcp-client libpcap-dev
+apt-get install -y iproute2 isc-dhcp-client libpcap-dev iw hostapd
 
 # Install eBPF/XDP dependencies
 echo "Installing eBPF/XDP tools..."
