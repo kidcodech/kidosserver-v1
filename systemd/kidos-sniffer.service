@@ -1,0 +1,18 @@
+[Unit]
+Description=Kidos Network Sniffer
+After=kidos-init.service
+Requires=kidos-init.service
+Wants=kidos-network.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/aigarssu/kidos/kidosserver-v1/monitoring/sniffer
+ExecStart=/usr/bin/bash -c "/usr/sbin/ip netns exec monns /home/aigarssu/kidos/kidosserver-v1/monitoring/sniffer/sniffer"
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
+
+[Install]
+WantedBy=multi-user.target

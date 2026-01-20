@@ -18,33 +18,44 @@ fi
 
 IFACE="$1"
 
-# Verify interface exists
-if ! ip link show "$IFACE" &>/dev/null; then
-    echo -e "${RED}✗ Error: Interface $IFACE not found${NC}"
-    exit 1
-fi
-
 # Verify ethns namespace exists
 if ! ip netns list | grep -q "^ethns"; then
     echo -e "${RED}✗ Error: ethns namespace not found. Run init.sh first.${NC}"
     exit 1
 fi
 
-echo "Connecting interface $IFACE to ethns namespace..."
+# Check where the interface is
+if ip link show "$IFACE" &>/dev/null; then
+    # Interface is in default namespace
+    echo "Connecting interface $IFACE to ethns namespace..."
 
-# Move interface to ethns namespace
-echo "Moving $IFACE to ethns namespace..."
-ip link set "$IFACE" netns ethns
+    # Move interface to ethns namespace
+    echo "Moving $IFACE to ethns namespace..."
+    ip link set "$IFACE" netns ethns
 
-# Bring up interface in ethns
-echo "Bringing up $IFACE in ethns..."
-ip netns exec ethns ip link set "$IFACE" up
+    # Bring up interface in ethns
+    echo "Bringing up $IFACE in ethns..."
+    ip netns exec ethns ip link set "$IFACE" up
 
-# Add interface to bridge
-echo "Adding $IFACE to br0 bridge..."
-ip netns exec ethns ip link set "$IFACE" master br0
+    # Add interface to bridge
+    echo "Adding $IFACE to br0 bridge..."
+    ip netns exec ethns ip link set "$IFACE" master br0
 
-echo -e "${GREEN}✓ Interface $IFACE connected to ethns bridge${NC}"
+    echo -e "${GREEN}✓ Interface $IFACE moved and connected to ethns bridge${NC}"
+
+elif ip netns exec ethns ip link show "$IFACE" &>/dev/null; then
+    # Interface is already in ethns
+    echo -e "${YELLOW}Interface $IFACE is already in ethns namespace${NC}"
+    
+    # Ensure it's up and in bridge
+    echo "Ensuring $IFACE is up and in br0..."
+    ip netns exec ethns ip link set "$IFACE" up
+    ip netns exec ethns ip link set "$IFACE" master br0 || true
+    
+else
+    echo -e "${RED}✗ Error: Interface $IFACE not found in default or ethns namespace${NC}"
+    exit 1
+fi
 
 # Request DHCP on ethns bridge
 echo "Requesting DHCP for ethns bridge..."

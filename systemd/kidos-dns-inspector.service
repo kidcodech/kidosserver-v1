@@ -1,0 +1,18 @@
+[Unit]
+Description=Kidos DNS Inspector
+After=kidos-init.service
+Requires=kidos-init.service
+Wants=kidos-network.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/aigarssu/kidos/kidosserver-v1/parental/dns-inspector
+ExecStart=/usr/bin/bash -c "/usr/sbin/ip netns exec kidosns /home/aigarssu/kidos/kidosserver-v1/parental/dns-inspector/dns-inspector veth-kidos-app"
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
+
+[Install]
+WantedBy=multi-user.target

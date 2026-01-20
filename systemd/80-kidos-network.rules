@@ -1,0 +1,5 @@
+# Kidos Network Auto-Connect
+# Automatically connect ethernet interfaces to ethns when plugged in
+
+# Trigger on ethernet interface add
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="en*|eth*", TAG+="systemd", ENV{SYSTEMD_WANTS}="kidos-network.service"

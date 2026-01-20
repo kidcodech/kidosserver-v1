@@ -232,7 +232,6 @@ hw_mode=g
 channel=$CHANNEL
 ieee80211n=1
 wmm_enabled=1
-p2p_disabled=1
 EOF
 else
     # WPA/WPA2 network
@@ -249,7 +248,6 @@ wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 ieee80211n=1
 wmm_enabled=1
-p2p_disabled=1
 EOF
 fi
 

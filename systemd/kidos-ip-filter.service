@@ -1,0 +1,18 @@
+[Unit]
+Description=Kidos IP Filter
+After=kidos-init.service kidos-network.service
+Requires=kidos-init.service
+Wants=kidos-network.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/aigarssu/kidos/kidosserver-v1/parental/ip-filter
+ExecStart=/usr/bin/bash -c "/usr/sbin/ip netns exec kidosns ip link set veth-kidos-app xdpgeneric off; /usr/sbin/ip netns exec kidosns ip link set veth-kidos-app xdpgeneric obj /home/aigarssu/kidos/kidosserver-v1/parental/ip-filter/xdp_ip_filter.o sec xdp; /home/aigarssu/kidos/kidosserver-v1/parental/ip-filter/ip-filter-sync"
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+# Kidos System Configuration
+# Copy this file to /etc/kidos/config and edit as needed
+
+# Internet connection (ethernet uplink)
+# Leave empty for auto-detect, or specify interface name
+ETHERNET_INTERFACE=""
+
+# Hotspot settings (WiFi AP mode only)
+HOTSPOT_AUTOSTART=false
+HOTSPOT_SSID=KidosNet
+HOTSPOT_PASSWORD=kidos123
+HOTSPOT_CHANNEL=6

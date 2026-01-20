@@ -1,5 +1,6 @@
 #!/bin/bash
 
+set -e
 set -x
 
 # Color codes
@@ -7,6 +8,9 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Create Kidos namespace
 echo "Creating Kidos namespace (kidosns)..."
@@ -115,6 +119,6 @@ echo "hosts: files dns" > /etc/netns/appsns2/nsswitch.conf
 
 # Setup monitoring namespace
 echo "Setting up monitoring namespace..."
-./scripts/monitoring/init.sh
+"$SCRIPT_DIR/monitoring/init.sh"
 
 echo "Setup complete!"

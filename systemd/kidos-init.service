@@ -1,0 +1,17 @@
+[Unit]
+Description=Kidos Network Namespaces Initialization
+After=network-pre.target
+Before=network.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bash /home/aigarssu/kidos/kidosserver-v1/scripts/init.sh
+ExecStop=/usr/bin/bash /home/aigarssu/kidos/kidosserver-v1/scripts/teardown.sh
+TimeoutStartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

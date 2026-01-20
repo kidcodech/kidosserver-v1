@@ -1,0 +1,18 @@
+[Unit]
+Description=Kidos Web Server
+After=kidos-init.service
+Requires=kidos-init.service
+Wants=kidos-network.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/aigarssu/kidos/kidosserver-v1/webserver
+ExecStart=/usr/bin/bash -c "/usr/sbin/ip netns exec kidosns /home/aigarssu/kidos/kidosserver-v1/webserver/webserver"
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
+
+[Install]
+WantedBy=multi-user.target

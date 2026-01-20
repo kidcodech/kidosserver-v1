@@ -1,0 +1,18 @@
+[Unit]
+Description=Kidos Network Connection
+After=kidos-init.service
+Requires=kidos-init.service
+Before=kidos-webserver.service kidos-dns-inspector.service kidos-sniffer.service kidos-ip-filter.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/bash /home/aigarssu/kidos/kidosserver-v1/scripts/network-start.sh
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
