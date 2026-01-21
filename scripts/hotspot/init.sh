@@ -38,7 +38,10 @@ if ip netns exec wifins ip link show 2>/dev/null | grep -q "^[0-9]*: wl"; then
     fi
 fi
 ip netns exec wifins pkill hostapd 2>/dev/null || true
-ip netns exec wifins pkill dhclient 2>/dev/null || true
+if [ -f /tmp/dhclient-wifins-br-wifi.pid ]; then
+    kill $(cat /tmp/dhclient-wifins-br-wifi.pid) 2>/dev/null || true
+    rm -f /tmp/dhclient-wifins-br-wifi.pid
+fi
 ip netns exec switchns ip link del veth-wifi-sw 2>/dev/null || true
 ip netns del wifins 2>/dev/null || true
 # Force remove namespace file if it still exists
@@ -261,10 +264,12 @@ sleep 3
 
 # Request IP for br-wifi bridge via DHCP
 echo "Requesting IP address for br-wifi bridge via DHCP..."
-ip netns exec wifins pkill dhclient 2>/dev/null || true
-sleep 1
+if [ -f /tmp/dhclient-wifins-br-wifi.pid ]; then
+    kill $(cat /tmp/dhclient-wifins-br-wifi.pid) 2>/dev/null || true
+    rm -f /tmp/dhclient-wifins-br-wifi.pid
+fi
 # Run dhclient in foreground to wait for completion
-ip netns exec wifins dhclient -v br-wifi
+ip netns exec wifins dhclient -v -pf /tmp/dhclient-wifins-br-wifi.pid br-wifi
 sleep 1
 
 # Check if IP was assigned

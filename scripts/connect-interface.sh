@@ -59,9 +59,11 @@ fi
 
 # Request DHCP on ethns bridge
 echo "Requesting DHCP for ethns bridge..."
-ip netns exec ethns pkill dhclient 2>/dev/null || true
-sleep 1
-ip netns exec ethns dhclient -v br0
+if [ -f /tmp/dhclient-ethns-br0.pid ]; then
+    kill $(cat /tmp/dhclient-ethns-br0.pid) 2>/dev/null || true
+    rm -f /tmp/dhclient-ethns-br0.pid
+fi
+ip netns exec ethns dhclient -v -pf /tmp/dhclient-ethns-br0.pid br0
 
 # Check if we got an IP
 ETHNS_IP=$(ip netns exec ethns ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
@@ -74,9 +76,11 @@ fi
 
 # Request DHCP for kidosns bridge
 echo "Requesting DHCP for kidosns bridge..."
-ip netns exec kidosns pkill dhclient 2>/dev/null || true
-sleep 1
-ip netns exec kidosns dhclient -v br1
+if [ -f /tmp/dhclient-kidosns-br1.pid ]; then
+    kill $(cat /tmp/dhclient-kidosns-br1.pid) 2>/dev/null || true
+    rm -f /tmp/dhclient-kidosns-br1.pid
+fi
+ip netns exec kidosns dhclient -v -pf /tmp/dhclient-kidosns-br1.pid br1
 
 BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -n "$BR1_IP" ]; then
@@ -89,9 +93,11 @@ fi
 
 # Request DHCP for switchns bridge
 echo "Requesting DHCP for switchns bridge..."
-ip netns exec switchns pkill dhclient 2>/dev/null || true
-sleep 1
-ip netns exec switchns dhclient -v br-switch
+if [ -f /tmp/dhclient-switchns-br-switch.pid ]; then
+    kill $(cat /tmp/dhclient-switchns-br-switch.pid) 2>/dev/null || true
+    rm -f /tmp/dhclient-switchns-br-switch.pid
+fi
+ip netns exec switchns dhclient -v -pf /tmp/dhclient-switchns-br-switch.pid br-switch
 
 BR_SWITCH_IP=$(ip netns exec switchns ip -4 addr show br-switch | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -n "$BR_SWITCH_IP" ]; then
@@ -102,9 +108,11 @@ fi
 
 # Request DHCP for appsns
 echo "Requesting DHCP for appsns..."
-ip netns exec appsns pkill dhclient 2>/dev/null || true
-sleep 1
-ip netns exec appsns dhclient -v veth-app
+if [ -f /tmp/dhclient-appsns-veth-app.pid ]; then
+    kill $(cat /tmp/dhclient-appsns-veth-app.pid) 2>/dev/null || true
+    rm -f /tmp/dhclient-appsns-veth-app.pid
+fi
+ip netns exec appsns dhclient -v -pf /tmp/dhclient-appsns-veth-app.pid veth-app
 
 VETH_APP_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -n "$VETH_APP_IP" ]; then
@@ -115,9 +123,11 @@ fi
 
 # Request DHCP for appsns2
 echo "Requesting DHCP for appsns2..."
-ip netns exec appsns2 pkill dhclient 2>/dev/null || true
-sleep 1
-ip netns exec appsns2 dhclient -v veth-app
+if [ -f /tmp/dhclient-appsns2-veth-app.pid ]; then
+    kill $(cat /tmp/dhclient-appsns2-veth-app.pid) 2>/dev/null || true
+    rm -f /tmp/dhclient-appsns2-veth-app.pid
+fi
+ip netns exec appsns2 dhclient -v -pf /tmp/dhclient-appsns2-veth-app.pid veth-app
 
 VETH_APP2_IP=$(ip netns exec appsns2 ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 if [ -n "$VETH_APP2_IP" ]; then
