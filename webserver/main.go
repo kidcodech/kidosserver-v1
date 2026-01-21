@@ -110,6 +110,11 @@ func main() {
 
 	router := mux.NewRouter()
 
+	// Authentication endpoints
+	router.HandleFunc("/api/auth/login", loginHandler).Methods("POST")
+	router.HandleFunc("/api/auth/logout", logoutHandler).Methods("POST")
+	router.HandleFunc("/api/admin/change-password", changePasswordHandler).Methods("POST")
+
 	// API endpoints
 	router.HandleFunc("/api/packets/aggregate", getPacketAggregates).Methods("GET")
 	router.HandleFunc("/api/packets/clear", clearPackets).Methods("POST")
@@ -183,6 +188,11 @@ func main() {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
 
+	// Serve login page
+	router.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "./frontend/dist/index.html")
+	}).Methods("GET")
+
 	// Serve static files on /admin/ with SPA fallback
 	router.PathPrefix("/admin/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Strip /admin prefix
@@ -204,7 +214,7 @@ func main() {
 	})
 
 	// Wrap router with CORS and captive portal middleware
-	handler := corsMiddleware(captivePortalMiddleware(router))
+	handler := corsMiddleware(captivePortalMiddleware(authMiddleware(router)))
 
 	// Start broadcast goroutine
 	go handleBroadcast()

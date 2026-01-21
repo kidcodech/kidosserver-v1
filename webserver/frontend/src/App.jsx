@@ -4,6 +4,7 @@ import { useNavigate, useLocation, Routes, Route } from 'react-router-dom'
 import './App.css'
 import UserManagement from './components/UserManagement'
 import Console from './components/Console'
+import AdminProfile from './components/AdminProfile'
 
 // Helper function to format bytes
 const formatBytes = (bytes) => {
@@ -151,6 +152,23 @@ function TrafficGraph({ data, onWidthChange }) {
 function App() {
   const navigate = useNavigate()
   const location = useLocation()
+  
+  // Check authentication status on mount for admin routes
+  useEffect(() => {
+    if (location.pathname.startsWith('/admin')) {
+      // Try to fetch a protected resource to verify session
+      fetch('/api/users?limit=1')
+        .then(res => {
+          if (res.status === 401) {
+            navigate('/login')
+          }
+        })
+        .catch(() => {
+          // network error, maybe ignore
+        })
+    }
+  }, [navigate, location.pathname])
+
   const isMobile = useMediaQuery({ query: '(max-width: 768px)' })
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   
@@ -1192,6 +1210,13 @@ function App() {
           >
             <span className="nav-icon">📡</span>
             <span className="nav-text">Hotspot</span>
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'admin' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}
+          >
+            <span className="nav-icon">🛡️</span>
+            <span className="nav-text">Admin</span>
           </button>
         </nav>
         {!isMobile && (
@@ -2612,6 +2637,10 @@ function App() {
           </>
           )}
         </div>
+      )}
+
+      {activeTab === 'admin' && (
+        <AdminProfile />
       )}
 
       </main>

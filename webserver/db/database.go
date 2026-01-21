@@ -38,6 +38,11 @@ func InitDB() error {
 		return err
 	}
 
+	// Ensure default admin exists
+	if err := EnsureDefaultAdmin(); err != nil {
+		log.Printf("Failed to ensure default admin: %v", err)
+	}
+
 	log.Println("✓ Database initialized successfully (foreign keys ON)")
 	return nil
 }
@@ -94,6 +99,13 @@ func runMigrations() error {
 		query_type TEXT DEFAULT 'A',
 		blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS admins (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT UNIQUE NOT NULL,
+		password_hash TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS system_settings (
