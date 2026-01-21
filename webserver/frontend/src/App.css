@@ -1666,3 +1666,32 @@ input:checked + .slider:before {
   bottom: 0 !important;
   top: auto !important;
 }
+
+/* ====== MOBILE LAYOUT FIXES ====== */
+@media (max-width: 768px) {
+  /* Fix global container width */
+  .App {
+    min-width: 0 !important;
+    flex-direction: column;
+    height: auto;
+    overflow-x: hidden;
+  }
+
+  /* Stack sidebar on top */
+  .sidebar {
+    position: relative;
+    width: 100%;
+    height: auto;
+    min-height: auto;
+    border-right: none;
+    border-bottom: 1px solid #2a2a3e;
+  }
+  
+  /* Reset main content margins */
+  .main-content {
+    margin-left: 0 !important;
+    width: 100%;
+    padding: 1rem;
+    flex: 1;
+  }
+}
