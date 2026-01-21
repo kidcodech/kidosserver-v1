@@ -97,12 +97,4 @@ for ns in $ALL_ETHNS; do
     fi
 done
 
-# Bring up all physical interfaces in default namespace
-echo "Bringing up physical interfaces..."
-ALL_PHYS_ETH=$(ip link show | grep -E '^[0-9]+: (en|eth)' | grep -v '@' | awk -F': ' '{print $2}' | awk '{print $1}')
-for iface in $ALL_PHYS_ETH; do
-    echo "Bringing up $iface..."
-    ip link set "$iface" up 2>/dev/null || true
-done
-
 echo "Teardown complete!"
