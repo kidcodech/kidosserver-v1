@@ -234,8 +234,19 @@ func main() {
 		server := &http.Server{
 			Addr: ":443",
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Redirect HTTPS traffic to HTTP captive portal (port 80)
-				http.Redirect(w, r, fmt.Sprintf("http://%s/blocked", serverIP), http.StatusFound)
+				host := r.Host
+				// Remove port if present
+				if colonIndex := strings.Index(host, ":"); colonIndex != -1 {
+					host = host[:colonIndex]
+				}
+
+				// If accessing router.kidos.tools, redirect to HTTP version
+				if host == "router.kidos.tools" || host == serverIP || host == "localhost" || host == "127.0.0.1" {
+					http.Redirect(w, r, fmt.Sprintf("http://%s%s", host, r.URL.Path), http.StatusMovedPermanently)
+				} else {
+					// Other domains (blocked) redirect to captive portal
+					http.Redirect(w, r, fmt.Sprintf("http://%s/blocked", serverIP), http.StatusFound)
+				}
 			}),
 			TLSConfig: &tls.Config{
 				Certificates: []tls.Certificate{cert},
@@ -284,6 +295,12 @@ func captivePortalMiddleware(next http.Handler) http.Handler {
 		// Remove port if present
 		if colonIndex := strings.Index(host, ":"); colonIndex != -1 {
 			host = host[:colonIndex]
+		}
+
+		// For router.kidos.tools, explicitly prevent HTTPS upgrades
+		if host == serverIP || host == "router.kidos.tools" {
+			// Clear any HSTS policy that might have been set
+			w.Header().Set("Strict-Transport-Security", "max-age=0")
 		}
 
 		// Allow requests to server IP, localhost, router.kidos.tools domain, and ngrok domains

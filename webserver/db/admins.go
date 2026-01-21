@@ -3,7 +3,7 @@ package db
 import (
 	"database/sql"
 	"log"
-	
+
 	"golang.org/x/crypto/bcrypt"
 )
 
