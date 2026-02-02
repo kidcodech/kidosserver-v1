@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # Configuration - can be overridden by environment variables or arguments
-SSID="${1:-${SSID:-KidosNet}}"
-PASSWORD="${2:-${HOTSPOT_PASSWORD:-kidos123}}"
-CHANNEL="${3:-${CHANNEL:-6}}"
-SECURITY="${4:-${SECURITY:-WPA2}}"
-IFACE="${5:-}"
+# Usage: ./init.sh [interface] [ssid] [password] [channel] [security]
+IFACE="${1:-}"
+SSID="${2:-${SSID:-KidosNet}}"
+PASSWORD="${3:-${HOTSPOT_PASSWORD:-kidos123}}"
+CHANNEL="${4:-${CHANNEL:-6}}"
+SECURITY="${5:-${SECURITY:-WPA2}}"
 
 set -e
 
@@ -100,10 +101,10 @@ if [ -z "$IFACE" ]; then
     IFACE=""
     timeout=10
     while [ "$timeout" -gt 0 ]; do
-        # Find wireless interfaces with 'u' in name (USB) or via sysfs check
+        # Find wireless interfaces (USB typically starts with wlx or has u in name)
         for iface in $(iw dev 2>/dev/null | grep Interface | awk '{print $2}' || true); do
-            # Check if it's a USB device (interface name contains 'u' like wlp0s20f0u1)
-            if echo "$iface" | grep -q "u[0-9]"; then
+            # Check if it's a USB device (wlx* or contains 'u' like wlp0s20f0u1)
+            if echo "$iface" | grep -qE "^wlx|u[0-9]"; then
                 IFACE="$iface"
                 echo "✓ Found USB wireless interface: $IFACE"
                 break 2
@@ -114,13 +115,19 @@ if [ -z "$IFACE" ]; then
     done
 
     if [ -z "$IFACE" ]; then
-        echo "Error: No USB wireless interface found after module reload"
-        echo "Available wireless interfaces:"
-        iw dev 2>/dev/null || true
-        echo ""
-        echo "Available network interfaces:"
-        ip link show | grep -E "^[0-9]+:"
-        exit 1
+        echo "Warning: No USB wireless interface found, checking for any wireless interface..."
+        IFACE=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' | head -n1 || true)
+        if [ -n "$IFACE" ]; then
+            echo "✓ Using wireless interface: $IFACE"
+        else
+            echo "Error: No wireless interface found"
+            echo "Available wireless interfaces:"
+            iw dev 2>/dev/null || true
+            echo ""
+            echo "Available network interfaces:"
+            ip link show | grep -E "^[0-9]+:"
+            exit 1
+        fi
     fi
 else
     echo "Using specified interface: $IFACE"
@@ -186,9 +193,19 @@ PHY=$(iw dev "$IFACE" info | grep wiphy | awk '{print $2}')
 if [ -n "$PHY" ]; then
     echo "Detected PHY: phy$PHY"
     if ! iw phy "phy$PHY" set netns name wifins 2>&1; then
-        echo "Error: Failed to move phy$PHY to wifins namespace"
-        echo "This usually means the interface is in use or in another namespace"
-        exit 1
+        echo "Warning: 'iw phy set netns name' failed. Trying via PID..."
+        # Start a dummy process in the namespace to get a PID
+        ip netns exec wifins sleep 5 &
+        files_pid=$!
+        # Give it a moment to start
+        sleep 0.1
+        if ! iw phy "phy$PHY" set netns $files_pid 2>&1; then
+            echo "Warning: 'iw phy set netns PID' failed. Falling back to 'ip link set netns'..."
+            if ! ip link set "$IFACE" netns wifins 2>&1; then
+                echo "Error: Failed to move $IFACE to wifins namespace"
+                exit 1
+            fi
+        fi
     fi
 else
     echo "Warning: Could not detect PHY, trying ip link method..."
