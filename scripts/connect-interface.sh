@@ -158,3 +158,5 @@ echo "  switchns:  $BR_SWITCH_IP"
 echo "  appsns:    $VETH_APP_IP"
 echo "  appsns2:   $VETH_APP2_IP"
 echo "  Gateway:   $GATEWAY"
+
+ip netns exec kidosns /usr/sbin/sshd
