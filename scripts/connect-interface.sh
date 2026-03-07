@@ -159,4 +159,5 @@ echo "  appsns:    $VETH_APP_IP"
 echo "  appsns2:   $VETH_APP2_IP"
 echo "  Gateway:   $GATEWAY"
 
-ip netns exec kidosns /usr/sbin/sshd
+# Start SSH server in ethns (where physical interface is) to allow access
+ip netns exec ethns /usr/sbin/sshd
