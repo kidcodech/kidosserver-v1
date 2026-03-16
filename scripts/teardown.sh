@@ -8,7 +8,7 @@ echo "Tearing down monitoring namespace..."
 
 # ---- Kill dhclient processes (using pid files from init.sh) ----
 echo "Stopping DHCP clients..."
-for pidfile in /tmp/dhclient-br-wan.pid /tmp/dhclient-ethns-br0.pid /tmp/dhclient-kidosns-br1.pid; do
+for pidfile in /tmp/dhclient-br-wan.pid /tmp/dhclient-ethns-br0.pid /tmp/dhclient-kidosns-br1.pid /tmp/dhclient-appsns.pid /tmp/dhclient-appsns2.pid; do
     if [ -f "$pidfile" ]; then
         kill "$(cat "$pidfile")" 2>/dev/null || true
         rm -f "$pidfile"

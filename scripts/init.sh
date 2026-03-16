@@ -236,6 +236,16 @@ ip netns exec kidosns dhclient -v -pf /tmp/dhclient-kidosns-br1.pid br1 || true
 BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
 [ -n "$BR1_IP" ] && echo -e "${GREEN}✓ kidosns IP: $BR1_IP${NC}"
 
+# DHCP for appsns
+ip netns exec appsns dhclient -v -pf /tmp/dhclient-appsns.pid veth-app || true
+VETH_APP_IP=$(ip netns exec appsns ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
+[ -n "$VETH_APP_IP" ] && echo -e "${GREEN}✓ appsns IP: $VETH_APP_IP${NC}"
+
+# DHCP for appsns2
+ip netns exec appsns2 dhclient -v -pf /tmp/dhclient-appsns2.pid veth-app || true
+VETH_APP2_IP=$(ip netns exec appsns2 ip -4 addr show veth-app | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
+[ -n "$VETH_APP2_IP" ] && echo -e "${GREEN}✓ appsns2 IP: $VETH_APP2_IP${NC}"
+
 echo "Setup complete!"
 echo ""
 [ -n "$BR_WAN_IP" ] && echo -e "${YELLOW}⚠ SSH reconnect needed: ssh user@$BR_WAN_IP${NC}"

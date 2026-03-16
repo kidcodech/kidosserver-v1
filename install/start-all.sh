@@ -80,6 +80,24 @@ echo ""
 # Wait for XDP to attach
 sleep 1
 
+# Write network config file that dns-inspector and webserver require
+BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+VETH_APP_IP=$(ip netns exec appsns ip -4 addr show veth-app 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1 || true)
+VETH_APP2_IP=$(ip netns exec appsns2 ip -4 addr show veth-app 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1 || true)
+GATEWAY=$(ip route | awk '/default/{print $3}' | head -1)
+if [ -z "$BR1_IP" ]; then
+    echo "Error: kidosns/br1 has no IP — run sudo ./scripts/init.sh first"
+    exit 1
+fi
+cat > /tmp/kidos-network.conf << EOF
+BR1_IP="$BR1_IP"
+VETH_APP_IP="${VETH_APP_IP:-}"
+VETH_APP2_IP="${VETH_APP2_IP:-}"
+GATEWAY="${GATEWAY:-}"
+EOF
+echo "✓ Network config written: BR1_IP=$BR1_IP GATEWAY=$GATEWAY"
+echo ""
+
 # 3. Start DNS inspector daemon (will find xsks_map and register AF_XDP socket)
 echo "[3/4] Starting DNS inspector daemon..."
 ip netns exec kidosns "$PROJECT_ROOT/parental/dns-inspector/dns-inspector" veth-kidos-app > /tmp/kidos-dns-inspector.log 2>&1 &
