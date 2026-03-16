@@ -17,6 +17,10 @@ cd "$PROJECT_ROOT"
 echo "=== Stopping Kidos Server v1 ==="
 echo ""
 
+echo "Stopping any systemd background services..."
+systemctl stop kidos-dns-inspector kidos-webserver kidos-ip-filter kidos-sniffer 2>/dev/null || true
+echo ""
+
 # 1. Stop webserver - kill ALL webserver processes first
 echo "[1/3] Stopping webserver..."
 WEBSERVER_PIDS=$(pgrep -f "webserver" | grep -v "grep" || true)

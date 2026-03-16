@@ -18,6 +18,10 @@ echo "=== Starting Kidos Server v1 ==="
 echo "Project root: $PROJECT_ROOT"
 echo ""
 
+echo "Stopping systemd background services to prevent conflicts..."
+systemctl stop kidos-dns-inspector kidos-webserver kidos-ip-filter kidos-network kidos-init kidos-sniffer 2>/dev/null || true
+echo ""
+
 # First, stop any running instances
 echo "Stopping any running instances..."
 "$PROJECT_ROOT/install/stop-all.sh" 2>/dev/null || true
