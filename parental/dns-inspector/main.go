@@ -393,6 +393,9 @@ func main() {
 	defer xsksMap.Close()
 
 	// 1. Create AF_XDP socket for a specific queue (queue 0)
+	// XDP_COPY (2) is required for xdpgeneric (SKB) mode - without it zero-copy is
+	// attempted which silently fails on veth and delivers no packets.
+	xdp.DefaultSocketFlags = 2 // XDP_COPY
 	queueID := uint32(0)
 	log.Printf("Creating AF_XDP socket for queue %d...", queueID)
 	xsk, err := xdp.NewSocket(iface.Index, int(queueID), nil)
@@ -530,7 +533,7 @@ func processPackets(xsk *xdp.Socket, reinjectFd int, reinjectAddr *syscall.Socka
 			if shouldIntercept {
 				// Check if it's kidos domain or blocked domain
 				normalizedDomain := strings.TrimSuffix(strings.ToLower(domain), ".")
-				if normalizedDomain == "kidos" {
+				if normalizedDomain == "router.kidos.tools" {
 					// Kidos domain - craft DNS response pointing to kidos IP
 					log.Printf("KIDOS: DNS query for %s - resolving to %s", domain, kidosIP)
 					response := craftDNSResponse(actualPacket, kidosIP)
