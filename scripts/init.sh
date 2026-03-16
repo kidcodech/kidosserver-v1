@@ -182,8 +182,18 @@ ip link set br-wan type bridge forward_delay 0
 # Set br-wan MAC to WAN interface MAC so router recognises it
 ip link set br-wan address "$WAN_MAC"
 
-# Prevent NetworkManager from re-assigning IP after flush
-nmcli device set "$WAN_IFACE" managed no 2>/dev/null || true
+# Permanently tell NetworkManager to stop managing the WAN interface
+# (nmcli device set managed no doesn't survive NM re-check cycles)
+NM_DROPIN="/etc/NetworkManager/conf.d/kidos-wan-unmanaged.conf"
+cat > "$NM_DROPIN" << EOF
+[keyfile]
+unmanaged-devices=interface-name:${WAN_IFACE}
+EOF
+nmcli general reload 2>/dev/null || true
+sleep 1   # give NM a moment to drop the interface
+
+# Disconnect any active connection on WAN interface
+nmcli device disconnect "$WAN_IFACE" 2>/dev/null || true
 # Remove existing IP from WAN interface before adding to bridge
 ip addr flush dev "$WAN_IFACE"
 ip link set "$WAN_IFACE" master br-wan

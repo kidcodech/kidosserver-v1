@@ -42,9 +42,13 @@ if ip link show br-wan >/dev/null 2>&1; then
 
     # Hand WAN interface back to NetworkManager and restore DHCP
     if [ -n "$WAN_IFACE" ]; then
-        nmcli device set "$WAN_IFACE" managed yes 2>/dev/null || true
+        # Remove the unmanaged drop-in so NM takes over again
+        NM_DROPIN="/etc/NetworkManager/conf.d/kidos-wan-unmanaged.conf"
+        rm -f "$NM_DROPIN"
+        nmcli general reload 2>/dev/null || true
+        sleep 1
         echo "Restoring DHCP on $WAN_IFACE..."
-        dhclient "$WAN_IFACE" 2>/dev/null &
+        nmcli device connect "$WAN_IFACE" 2>/dev/null || dhclient "$WAN_IFACE" 2>/dev/null &
         echo "  Waiting for IP on $WAN_IFACE..."
         sleep 3
         ip -4 addr show "$WAN_IFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' \
