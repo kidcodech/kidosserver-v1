@@ -1,8 +1,11 @@
 # Kidos System Configuration
 # Copy this file to /etc/kidos/config and edit as needed
 
-# Internet connection (ethernet uplink)
-# Leave empty for auto-detect, or specify interface name
+# WAN interface (internet uplink, stays in root namespace, bridged via br-wan)
+# Leave empty for auto-detect via default route
+WAN_INTERFACE=""
+
+# LAN interface (wired client port, moved to switchns for DNS filtering)
 ETHERNET_INTERFACE=""
 
 # Hotspot settings (WiFi AP mode only)

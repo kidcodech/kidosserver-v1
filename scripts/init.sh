@@ -128,33 +128,73 @@ echo "hosts: files dns" > /etc/netns/appsns2/nsswitch.conf
 echo "Setting up monitoring namespace..."
 "$SCRIPT_DIR/monitoring/init.sh"
 
-# ---- Internet uplink: root namespace -> ethns via veth-mgmt pair ----
-# enp2s0 stays in root namespace (SSH always works), veth-mgmt feeds internet into ethns br0
-echo "Creating internet uplink (root -> ethns)..."
+# ---- WAN bridge: bridge enp2s0 + veth-mgmt in root namespace ----
+# This makes the setup L2 transparent - ethns and all downstream namespaces
+# get real IPs directly from the home router via br-wan -> enp2s0
+echo "Creating WAN bridge (br-wan)..."
+
+# Detect WAN interface (the one with internet/default route)
+WAN_IFACE=""
+CONFIG_FILE="/etc/kidos/config"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+    WAN_IFACE="${WAN_INTERFACE:-}"
+fi
+if [ -z "$WAN_IFACE" ]; then
+    WAN_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+fi
+
+if [ -z "$WAN_IFACE" ]; then
+    echo -e "${RED}✗ No WAN interface found, cannot create br-wan${NC}"
+    exit 1
+fi
+
+echo "WAN interface: $WAN_IFACE"
+
+# Capture MAC and current IP before bridging (for reconnect info)
+WAN_MAC=$(ip link show "$WAN_IFACE" | awk '/ether/ {print $2}')
+WAN_IP=$(ip -4 addr show "$WAN_IFACE" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
+echo "Current WAN IP: $WAN_IP (will change after bridging, reconnect to new br-wan IP)"
+
+# Create veth-mgmt pair first (before bridging enp2s0)
 ip link add veth-mgmt type veth peer name veth-mgmt-eth
 ip link set veth-mgmt-eth netns ethns
 ip netns exec ethns ip link set veth-mgmt-eth master br0
 ip netns exec ethns ip link set veth-mgmt-eth up
 ip link set veth-mgmt up
-echo -e "${GREEN}✓ veth-mgmt (root) <-> veth-mgmt-eth (ethns br0) created${NC}"
 
-# DHCP for ethns br0 (gets IP from router via root namespace)
+# Create br-wan and bridge enp2s0 + veth-mgmt together
+ip link add br-wan type bridge
+ip link set br-wan type bridge stp_state 0
+ip link set br-wan type bridge forward_delay 0
+# Set br-wan MAC to WAN interface MAC so router recognises it
+ip link set br-wan address "$WAN_MAC"
+
+# Remove existing IP from WAN interface before adding to bridge
+ip addr flush dev "$WAN_IFACE"
+ip link set "$WAN_IFACE" master br-wan
+ip link set "$WAN_IFACE" up
+ip link set veth-mgmt master br-wan
+ip link set veth-mgmt up
+ip link set br-wan up
+echo -e "${GREEN}✓ br-wan bridge: $WAN_IFACE + veth-mgmt${NC}"
+
+# DHCP for br-wan (root namespace gets new IP from router)
+dhclient -v -pf /tmp/dhclient-br-wan.pid br-wan || true
+BR_WAN_IP=$(ip -4 addr show br-wan | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
+[ -n "$BR_WAN_IP" ] && echo -e "${GREEN}✓ br-wan IP: $BR_WAN_IP (SSH here after reconnect)${NC}"
+
+# DHCP for ethns br0 (gets real IP from router via veth-mgmt-eth -> br0 -> veth-eth -> kidosns)
 ip netns exec ethns dhclient -v -pf /tmp/dhclient-ethns-br0.pid br0 || true
 ETHNS_IP=$(ip netns exec ethns ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
 [ -n "$ETHNS_IP" ] && echo -e "${GREEN}✓ ethns IP: $ETHNS_IP${NC}"
 
 # ---- Connect LAN ethernet interface to switchns ----
 # enp1s0 (LAN client port) moves to switchns so wired clients go through DNS filtering
-LAN_IFACE=""
-
-CONFIG_FILE="/etc/kidos/config"
-if [ -f "$CONFIG_FILE" ]; then
-    source "$CONFIG_FILE"
-    LAN_IFACE="${ETHERNET_INTERFACE:-}"
-fi
+LAN_IFACE="${ETHERNET_INTERFACE:-}"
 
 if [ -z "$LAN_IFACE" ]; then
-    echo -e "${YELLOW}⚠ No LAN interface configured in $CONFIG_FILE (ETHERNET_INTERFACE), skipping LAN setup${NC}"
+    echo -e "${YELLOW}⚠ No LAN interface configured (ETHERNET_INTERFACE), skipping LAN setup${NC}"
 else
     if ip link show "$LAN_IFACE" &>/dev/null; then
         echo "Moving LAN interface $LAN_IFACE to switchns..."
@@ -173,3 +213,5 @@ BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.
 [ -n "$BR1_IP" ] && echo -e "${GREEN}✓ kidosns IP: $BR1_IP${NC}"
 
 echo "Setup complete!"
+echo ""
+[ -n "$BR_WAN_IP" ] && echo -e "${YELLOW}⚠ SSH reconnect needed: ssh user@$BR_WAN_IP${NC}"
