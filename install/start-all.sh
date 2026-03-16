@@ -60,18 +60,12 @@ if ! ip netns list | grep -q "kidosns"; then
     exit 1
 fi
 
-# 1. Start packet sniffer in monitoring namespace
-echo "[1/3] Starting packet sniffer daemon..."
-# Remove any existing XDP program first
-ip netns exec monns ip link set veth-mon xdp off 2>/dev/null || true
-ip netns exec monns "$PROJECT_ROOT/monitoring/sniffer/sniffer" > /tmp/kidos-sniffer.log 2>&1 &
-SNIFFER_PID=$!
-echo "✓ Sniffer started (PID: $SNIFFER_PID)"
-echo "  Logs: /tmp/kidos-sniffer.log"
+# 1. Sniffer disabled - testing DNS blocking only
+# ip netns exec monns ip link set veth-mon xdp off 2>/dev/null || true
+# ip netns exec monns "$PROJECT_ROOT/monitoring/sniffer/sniffer" > /tmp/kidos-sniffer.log 2>&1 &
+SNIFFER_PID=""
+echo "[1/3] Sniffer disabled (skipping)"
 echo ""
-
-# Wait a moment for sniffer to initialize
-sleep 2
 
 # 2. Load combined XDP program (IP filter + DNS redirection)
 echo "[2/4] Loading combined XDP program (IP filter + DNS inspector)..."
