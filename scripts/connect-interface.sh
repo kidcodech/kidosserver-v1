@@ -74,6 +74,34 @@ else
     exit 1
 fi
 
+# Management backhaul: veth-mgmt (root ns) <-> veth-mgmt-eth (ethns br0)
+# This gives the host a permanent IP for SSH without needing sshd in ethns
+echo "Setting up management backhaul to root namespace..."
+if ! ip link show veth-mgmt &>/dev/null; then
+    ip link add veth-mgmt type veth peer name veth-mgmt-eth
+    ip link set veth-mgmt-eth netns ethns
+    ip netns exec ethns ip link set veth-mgmt-eth master br0
+    ip netns exec ethns ip link set veth-mgmt-eth up
+    ip link set veth-mgmt up
+    echo -e "${GREEN}✓ Management veth created${NC}"
+else
+    echo -e "${YELLOW}Management veth already exists${NC}"
+fi
+
+# Request DHCP for root namespace via management veth
+if [ -f /tmp/dhclient-veth-mgmt.pid ]; then
+    kill $(cat /tmp/dhclient-veth-mgmt.pid) 2>/dev/null || true
+    rm -f /tmp/dhclient-veth-mgmt.pid
+fi
+dhclient -v -pf /tmp/dhclient-veth-mgmt.pid veth-mgmt
+
+MGMT_IP=$(ip -4 addr show veth-mgmt | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+if [ -n "$MGMT_IP" ]; then
+    echo -e "${GREEN}✓ Host management IP: $MGMT_IP (SSH here)${NC}"
+else
+    echo -e "${YELLOW}⚠ Failed to get DHCP for veth-mgmt${NC}"
+fi
+
 # Request DHCP for kidosns bridge
 echo "Requesting DHCP for kidosns bridge..."
 if [ -f /tmp/dhclient-kidosns-br1.pid ]; then
@@ -153,11 +181,9 @@ echo -e "${GREEN}✓ Network configuration complete!${NC}"
 echo "Summary:"
 echo "  Interface: $IFACE -> ethns"
 echo "  ethns:     $ETHNS_IP"
+echo "  host mgmt: $MGMT_IP  <-- SSH here"
 echo "  kidosns:   $BR1_IP"
 echo "  switchns:  $BR_SWITCH_IP"
 echo "  appsns:    $VETH_APP_IP"
 echo "  appsns2:   $VETH_APP2_IP"
 echo "  Gateway:   $GATEWAY"
-
-# Start SSH server in ethns (where physical interface is) to allow access
-ip netns exec ethns /usr/sbin/sshd

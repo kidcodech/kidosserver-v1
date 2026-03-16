@@ -121,4 +121,63 @@ echo "hosts: files dns" > /etc/netns/appsns2/nsswitch.conf
 echo "Setting up monitoring namespace..."
 "$SCRIPT_DIR/monitoring/init.sh"
 
+# ---- Connect Ethernet to ethns ----
+echo "Auto-detecting ethernet interface..."
+ETH_IFACE=""
+
+# Check config file first
+CONFIG_FILE="/etc/kidos/config"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+    ETH_IFACE="${ETHERNET_INTERFACE:-}"
+fi
+
+# Auto-detect if not configured
+if [ -z "$ETH_IFACE" ]; then
+    ETH_IFACE=$(ip link show | grep -E '^[0-9]+: (en|eth)' | grep -v '@' | awk -F': ' '{print $2}' | awk '{print $1}' | head -n1)
+fi
+
+if [ -z "$ETH_IFACE" ]; then
+    echo -e "${YELLOW}⚠ No ethernet interface found, skipping network setup${NC}"
+else
+    echo "Using ethernet interface: $ETH_IFACE"
+
+    # Move eth to ethns and add to br0
+    ip link set "$ETH_IFACE" netns ethns
+    ip netns exec ethns ip link set "$ETH_IFACE" up
+    ip netns exec ethns ip link set "$ETH_IFACE" master br0
+    echo -e "${GREEN}✓ $ETH_IFACE moved to ethns${NC}"
+
+    # Management backhaul: veth-mgmt stays in root ns, veth-mgmt-eth goes into ethns br0
+    # This gives the host a permanent IP for SSH
+    ip link add veth-mgmt type veth peer name veth-mgmt-eth
+    ip link set veth-mgmt-eth netns ethns
+    ip netns exec ethns ip link set veth-mgmt-eth master br0
+    ip netns exec ethns ip link set veth-mgmt-eth up
+    ip link set veth-mgmt up
+    echo -e "${GREEN}✓ Management backhaul created (veth-mgmt)${NC}"
+
+    # DHCP for ethns bridge
+    ip netns exec ethns dhclient -v -pf /tmp/dhclient-ethns-br0.pid br0
+    ETHNS_IP=$(ip netns exec ethns ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
+    [ -n "$ETHNS_IP" ] && echo -e "${GREEN}✓ ethns IP: $ETHNS_IP${NC}"
+
+    # DHCP for root namespace management interface (SSH access)
+    dhclient -v -pf /tmp/dhclient-veth-mgmt.pid veth-mgmt || true
+    MGMT_IP=$(ip -4 addr show veth-mgmt | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
+    [ -n "$MGMT_IP" ] && echo -e "${GREEN}✓ Host SSH IP: $MGMT_IP${NC}"
+
+    # DHCP for kidosns
+    ip netns exec kidosns dhclient -v -pf /tmp/dhclient-kidosns-br1.pid br1 || true
+    BR1_IP=$(ip netns exec kidosns ip -4 addr show br1 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
+    [ -n "$BR1_IP" ] && echo -e "${GREEN}✓ kidosns IP: $BR1_IP${NC}"
+
+    # DHCP for switchns
+    ip netns exec switchns dhclient -v -pf /tmp/dhclient-switchns-br-switch.pid br-switch || true
+
+    # DHCP for appsns
+    ip netns exec appsns dhclient -v -pf /tmp/dhclient-appsns-veth-app.pid veth-app || true
+    ip netns exec appsns2 dhclient -v -pf /tmp/dhclient-appsns2-veth-app.pid veth-app || true
+fi
+
 echo "Setup complete!"
