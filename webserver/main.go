@@ -2445,13 +2445,13 @@ func setupHotspot(config HotspotConfig) error {
 	workspaceRoot := filepath.Dir(wd)
 	scriptPath := filepath.Join(workspaceRoot, "scripts", "hotspot", "init.sh")
 
-	// Build command arguments: SSID PASSWORD CHANNEL SECURITY INTERFACE
+	// Build command arguments: INTERFACE SSID PASSWORD CHANNEL SECURITY
 	args := []string{
+		config.Interface,
 		config.SSID,
 		config.Password,
 		config.Channel,
 		config.Security,
-		config.Interface,
 	}
 
 	log.Printf("Executing hotspot script: %s %v", scriptPath, args)
