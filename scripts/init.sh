@@ -112,6 +112,18 @@ ip netns exec switchns ip link set br-switch up
 ip netns exec appsns ip link set veth-app up
 ip netns exec appsns2 ip link set veth-app up
 
+# Setup DNS for kidosns
+echo "Configuring DNS for kidosns..."
+mkdir -p /etc/netns/kidosns
+echo "nameserver 8.8.8.8" > /etc/netns/kidosns/resolv.conf
+echo "hosts: files dns" > /etc/netns/kidosns/nsswitch.conf
+
+# Setup DNS for switchns
+echo "Configuring DNS for switchns..."
+mkdir -p /etc/netns/switchns
+echo "nameserver 8.8.8.8" > /etc/netns/switchns/resolv.conf
+echo "hosts: files dns" > /etc/netns/switchns/nsswitch.conf
+
 # Setup DNS for appsns
 echo "Configuring DNS for appsns..."
 mkdir -p /etc/netns/appsns
