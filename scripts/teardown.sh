@@ -42,6 +42,10 @@ if ip link show br-wan >/dev/null 2>&1; then
 
     # Hand WAN interface back to NetworkManager and restore DHCP
     if [ -n "$WAN_IFACE" ]; then
+        # Remove udev rule for WAN cable replugs
+        rm -f /etc/udev/rules.d/99-kidos-wan-plug.rules
+        udevadm control --reload-rules || true
+
         # Remove the unmanaged drop-in so NM takes over again
         NM_DROPIN="/etc/NetworkManager/conf.d/kidos-wan-unmanaged.conf"
         rm -f "$NM_DROPIN"

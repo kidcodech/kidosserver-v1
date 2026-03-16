@@ -208,6 +208,11 @@ dhclient -v -pf /tmp/dhclient-br-wan.pid br-wan || true
 BR_WAN_IP=$(ip -4 addr show br-wan | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
 [ -n "$BR_WAN_IP" ] && echo -e "${GREEN}✓ br-wan IP: $BR_WAN_IP (SSH here after reconnect)${NC}"
 
+# Set up udev rule to re-trigger dhclient on br-wan if the physical cable is replugged
+UDEV_RULE_FILE="/etc/udev/rules.d/99-kidos-wan-plug.rules"
+echo "ACTION==\"change\", SUBSYSTEM==\"net\", ENV{INTERFACE}==\"$WAN_IFACE\", ENV{OPERSTATE}==\"up\", RUN+=\"/usr/sbin/dhclient -v br-wan\"" > "$UDEV_RULE_FILE"
+udevadm control --reload-rules || true
+
 # DHCP for ethns br0 (gets real IP from router via veth-mgmt-eth -> br0 -> veth-eth -> kidosns)
 ip netns exec ethns dhclient -v -pf /tmp/dhclient-ethns-br0.pid br0 || true
 ETHNS_IP=$(ip netns exec ethns ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
