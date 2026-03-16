@@ -142,11 +142,21 @@ if [ -z "$ETH_IFACE" ]; then
 else
     echo "Using ethernet interface: $ETH_IFACE"
 
+    # Capture MAC before moving - router DHCP likely has a lease for this MAC
+    ETH_MAC=$(ip link show "$ETH_IFACE" | awk '/ether/ {print $2}')
+    echo "Captured MAC: $ETH_MAC"
+
+    # Clean up stale dhclient lease files to avoid "Corrupt lease file" warnings
+    rm -f /var/lib/dhclient/dhclient*.leases /tmp/dhclient-*.pid 2>/dev/null || true
+
     # Move eth to ethns and add to br0
     ip link set "$ETH_IFACE" netns ethns
     ip netns exec ethns ip link set "$ETH_IFACE" up
     ip netns exec ethns ip link set "$ETH_IFACE" master br0
-    echo -e "${GREEN}✓ $ETH_IFACE moved to ethns${NC}"
+
+    # Set br0 MAC to match original eth MAC so router DHCP recognizes it
+    ip netns exec ethns ip link set br0 address "$ETH_MAC"
+    echo -e "${GREEN}✓ $ETH_IFACE moved to ethns, br0 MAC set to $ETH_MAC${NC}"
 
     # Management backhaul: veth-mgmt stays in root ns, veth-mgmt-eth goes into ethns br0
     # This gives the host a permanent IP for SSH
