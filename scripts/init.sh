@@ -170,6 +170,8 @@ ip link set br-wan type bridge forward_delay 0
 # Set br-wan MAC to WAN interface MAC so router recognises it
 ip link set br-wan address "$WAN_MAC"
 
+# Prevent NetworkManager from re-assigning IP after flush
+nmcli device set "$WAN_IFACE" managed no 2>/dev/null || true
 # Remove existing IP from WAN interface before adding to bridge
 ip addr flush dev "$WAN_IFACE"
 ip link set "$WAN_IFACE" master br-wan
