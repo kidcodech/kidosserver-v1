@@ -15,7 +15,7 @@ for pidfile in /tmp/dhclient-br-wan.pid /tmp/dhclient-ethns-br0.pid /tmp/dhclien
     fi
 done
 # Also kill any stray dhclient processes inside namespaces
-for ns in ethns kidosns switchns appsns appsns2; do
+for ns in ethns kidosns switchns appsns appsns2 wifins; do
     ip netns exec "$ns" pkill dhclient 2>/dev/null || true
 done
 
@@ -72,10 +72,15 @@ for ns in switchns ethns; do
     done
 done
 
+# Try to run hotspot teardown script first so physical wifi interfaces return to host cleanly
+if [ -f "$(dirname "$0")/hotspot/teardown.sh" ]; then
+    "$(dirname "$0")/hotspot/teardown.sh"
+fi
+
 # ---- Delete all namespaces ----
 # Deleting a namespace automatically removes all veth endpoints inside it.
 echo "Deleting namespaces..."
-for ns in switchns kidosns appsns appsns2 ethns; do
+for ns in switchns kidosns appsns appsns2 ethns wifins; do
     ip netns del "$ns" 2>/dev/null && echo "  Deleted $ns" || true
 done
 
