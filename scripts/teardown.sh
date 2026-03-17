@@ -43,6 +43,7 @@ if ip link show br-wan >/dev/null 2>&1; then
     # Hand WAN interface back to NetworkManager and restore DHCP
     if [ -n "$WAN_IFACE" ]; then
         # Remove udev rule for WAN cable replugs
+        rm -f /usr/local/bin/kidos-wan-reconnect
         rm -f /etc/udev/rules.d/99-kidos-wan-plug.rules
         udevadm control --reload-rules || true
 

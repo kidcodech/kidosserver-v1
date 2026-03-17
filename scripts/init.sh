@@ -208,9 +208,31 @@ dhclient -v -pf /tmp/dhclient-br-wan.pid br-wan || true
 BR_WAN_IP=$(ip -4 addr show br-wan | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || true)
 [ -n "$BR_WAN_IP" ] && echo -e "${GREEN}✓ br-wan IP: $BR_WAN_IP (SSH here after reconnect)${NC}"
 
-# Set up udev rule to re-trigger dhclient on br-wan if the physical cable is replugged
+# Push DHCP-provided DNS servers to systemd-resolved for br-wan
+# dhclient-script doesn't do this automatically for manually created bridges
+DHCP_DNS=$(grep -h "domain-name-servers" /var/lib/dhclient/*.leases /var/lib/dhcp/dhclient.leases 2>/dev/null \
+    | tail -1 | grep -oP '[\d.]+' | tr '\n' ' ')
+if [ -z "$DHCP_DNS" ]; then
+    DHCP_DNS="8.8.8.8 8.8.4.4"
+    echo -e "${YELLOW}⚠ Could not read DHCP DNS, falling back to $DHCP_DNS${NC}"
+fi
+resolvectl dns br-wan $DHCP_DNS 2>/dev/null || true
+resolvectl default-route br-wan yes 2>/dev/null || true
+echo -e "${GREEN}✓ DNS for root namespace: $DHCP_DNS${NC}"
+
+# Set up udev rule to re-trigger dhclient + DNS restore on br-wan cable replug
+RECONNECT_SCRIPT="/usr/local/bin/kidos-wan-reconnect"
+cat > "$RECONNECT_SCRIPT" << 'EOF'
+#!/bin/bash
+/usr/sbin/dhclient -v br-wan
+DHCP_DNS=$(grep -h "domain-name-servers" /var/lib/dhclient/*.leases /var/lib/dhcp/dhclient.leases 2>/dev/null \
+    | tail -1 | grep -oP '[\d.]+' | tr '\n' ' ')
+[ -n "$DHCP_DNS" ] && resolvectl dns br-wan $DHCP_DNS && resolvectl default-route br-wan yes
+EOF
+chmod +x "$RECONNECT_SCRIPT"
+
 UDEV_RULE_FILE="/etc/udev/rules.d/99-kidos-wan-plug.rules"
-echo "ACTION==\"change\", SUBSYSTEM==\"net\", ENV{INTERFACE}==\"br-wan\", ENV{OPERSTATE}==\"up\", RUN+=\"/usr/sbin/dhclient -v br-wan\"" > "$UDEV_RULE_FILE"
+echo "ACTION==\"change\", SUBSYSTEM==\"net\", ENV{INTERFACE}==\"br-wan\", ENV{OPERSTATE}==\"up\", RUN+=\"/usr/bin/systemd-run --no-block $RECONNECT_SCRIPT\"" > "$UDEV_RULE_FILE"
 udevadm control --reload-rules || true
 
 # DHCP for ethns br0 (gets real IP from router via veth-mgmt-eth -> br0 -> veth-eth -> kidosns)
