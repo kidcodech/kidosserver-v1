@@ -2,6 +2,11 @@
 
 set -e
 
+# Stop and disable all kidos systemd services so they don't restart
+echo "Stopping and disabling kidos systemd services..."
+systemctl stop kidos-init kidos-network kidos-webserver kidos-dns-inspector kidos-ip-filter kidos-sniffer 2>/dev/null || true
+systemctl disable kidos-init kidos-network kidos-webserver kidos-dns-inspector kidos-ip-filter kidos-sniffer 2>/dev/null || true
+
 # Teardown monitoring namespace first
 echo "Tearing down monitoring namespace..."
 "$(dirname "$0")/monitoring/teardown.sh"
