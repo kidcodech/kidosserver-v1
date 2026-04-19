@@ -75,6 +75,9 @@ for ns in switchns ethns; do
     for iface in $PHYS; do
         echo "  Moving $iface from $ns -> root"
         ip netns exec "$ns" ip link set "$iface" netns 1 2>/dev/null || true
+        ip link set "$iface" up 2>/dev/null || true
+        nmcli device connect "$iface" 2>/dev/null || dhclient "$iface" 2>/dev/null &
+        echo "  Handed $iface back to NetworkManager"
     done
 done
 
