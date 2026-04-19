@@ -235,9 +235,9 @@ func findLoadedMaps() error {
 			eventsMap = m
 			log.Printf("Found events map (ID: %d)", mapID)
 		}
-		if info.Name == "allowed_encrypted_dns_macs" {
+		if info.Name == "allow_enc_dns" {
 			allowedEncryptedDNSMACsMap = m
-			log.Printf("Found allowed_encrypted_dns_macs map (ID: %d)", mapID)
+			log.Printf("Found allow_enc_dns map (ID: %d)", mapID)
 		}
 	}
 
@@ -257,7 +257,7 @@ func findLoadedMaps() error {
 		log.Println("⚠ doh_ip_list map not found - DoH blocking may not work")
 	}
 	if allowedEncryptedDNSMACsMap == nil {
-		log.Println("⚠ allowed_encrypted_dns_macs map not found - per-user encrypted DNS override will not work")
+		log.Println("⚠ allow_enc_dns map not found - per-user encrypted DNS override will not work")
 	}
 
 	return nil

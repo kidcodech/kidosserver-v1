@@ -106,7 +106,7 @@ struct {
     __uint(max_entries, 10000);
     __type(key, struct mac_addr);
     __type(value, __u32);         // 1 = allowed to use encrypted DNS
-} allowed_encrypted_dns_macs SEC(".maps");
+} allow_enc_dns SEC(".maps");
 
 // Perf event map for logging
 struct {
@@ -164,7 +164,7 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
             evt.protocol = 0; // DoT
 
             // Check per-MAC override: if this device is explicitly allowed, bypass global setting
-            __u32 *mac_allowed = bpf_map_lookup_elem(&allowed_encrypted_dns_macs, &src_mac);
+            __u32 *mac_allowed = bpf_map_lookup_elem(&allow_enc_dns, &src_mac);
 
             // If map entry exists and value is 1, allow. Otherwise (0 or null), block.
             if ((allow_dot && *allow_dot == 1) || (mac_allowed && *mac_allowed == 1)) {
@@ -196,7 +196,7 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
                 evt.protocol = 1; // DoH
 
                 // Check per-MAC override
-                __u32 *mac_allowed_doh = bpf_map_lookup_elem(&allowed_encrypted_dns_macs, &src_mac);
+                __u32 *mac_allowed_doh = bpf_map_lookup_elem(&allow_enc_dns, &src_mac);
 
                 if ((!allow_doh || *allow_doh == 0) && !(mac_allowed_doh && *mac_allowed_doh == 1)) {
                     evt.blocked = 1; // Blocked
@@ -235,7 +235,7 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
             evt.protocol = 2; // DoQ
 
             // Check per-MAC override
-            __u32 *mac_allowed_doq = bpf_map_lookup_elem(&allowed_encrypted_dns_macs, &src_mac);
+            __u32 *mac_allowed_doq = bpf_map_lookup_elem(&allow_enc_dns, &src_mac);
 
             // If map entry exists and value is 1, allow. Otherwise (0 or null), block.
             if ((allow_doq && *allow_doq == 1) || (mac_allowed_doq && *mac_allowed_doq == 1)) {
