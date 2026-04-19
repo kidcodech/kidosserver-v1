@@ -7,6 +7,15 @@ echo "Stopping and disabling kidos systemd services..."
 systemctl stop kidos-init kidos-network kidos-webserver kidos-dns-inspector kidos-ip-filter kidos-sniffer 2>/dev/null || true
 systemctl disable kidos-init kidos-network kidos-webserver kidos-dns-inspector kidos-ip-filter kidos-sniffer 2>/dev/null || true
 
+# ---- Remove NM unmanaged drop-in early so it never survives a reboot ----
+# (set -e means any later failure would skip this if it were at the bottom)
+NM_DROPIN="/etc/NetworkManager/conf.d/kidos-wan-unmanaged.conf"
+if [ -f "$NM_DROPIN" ]; then
+    echo "Removing NetworkManager unmanaged drop-in ($NM_DROPIN)..."
+    rm -f "$NM_DROPIN"
+    nmcli general reload 2>/dev/null || true
+fi
+
 # Teardown monitoring namespace first
 echo "Tearing down monitoring namespace..."
 "$(dirname "$0")/monitoring/teardown.sh"
@@ -52,10 +61,6 @@ if ip link show br-wan >/dev/null 2>&1; then
         rm -f /etc/udev/rules.d/99-kidos-wan-plug.rules
         udevadm control --reload-rules || true
 
-        # Remove the unmanaged drop-in so NM takes over again
-        NM_DROPIN="/etc/NetworkManager/conf.d/kidos-wan-unmanaged.conf"
-        rm -f "$NM_DROPIN"
-        nmcli general reload 2>/dev/null || true
         sleep 1
         echo "Restoring DHCP on $WAN_IFACE..."
         nmcli device connect "$WAN_IFACE" 2>/dev/null || dhclient "$WAN_IFACE" 2>/dev/null &
