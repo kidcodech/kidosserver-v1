@@ -140,28 +140,83 @@ echo "hosts: files dns" > /etc/netns/appsns2/nsswitch.conf
 echo "Setting up monitoring namespace..."
 "$SCRIPT_DIR/monitoring/init.sh"
 
-# ---- WAN bridge: bridge enp2s0 + veth-mgmt in root namespace ----
+# ---- WAN bridge: bridge WAN iface + veth-mgmt in root namespace ----
 # This makes the setup L2 transparent - ethns and all downstream namespaces
-# get real IPs directly from the home router via br-wan -> enp2s0
-echo "Creating WAN bridge (br-wan)..."
+# get real IPs directly from the home router via br-wan -> WAN iface
 
-# Detect WAN interface (the one with internet/default route)
-WAN_IFACE=""
-CONFIG_FILE="/etc/kidos/config"
-if [ -f "$CONFIG_FILE" ]; then
-    source "$CONFIG_FILE"
-    WAN_IFACE="${WAN_INTERFACE:-}"
-fi
-if [ -z "$WAN_IFACE" ]; then
-    WAN_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-fi
+# ---- Discover and display all physical ethernet interfaces ----
+DEFAULT_WAN=$(ip route | grep default | awk '{print $5}' | head -n1)
 
-if [ -z "$WAN_IFACE" ]; then
-    echo -e "${RED}✗ No WAN interface found, cannot create br-wan${NC}"
+echo ""
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}  Available Ethernet Interfaces${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+printf "  %-12s %-20s %-18s %-8s %s\n" "INTERFACE" "MAC ADDRESS" "IP ADDRESS" "STATE" "DEFAULT ROUTE"
+
+ETH_IFACES=()
+while IFS= read -r iface; do
+    # Skip loopback, bridges, veth, wifi
+    [[ "$iface" == lo ]]         && continue
+    [[ "$iface" == br-* ]]       && continue
+    [[ "$iface" == veth* ]]      && continue
+    ip link show "$iface" 2>/dev/null | grep -q 'link/ether' || continue
+
+    mac=$(ip link show "$iface" | awk '/ether/ {print $2}')
+    ip4=$(ip -4 addr show "$iface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | head -n1)
+    [ -z "$ip4" ] && ip4="-"
+    state=$(ip link show "$iface" | grep -oP '(?<=state )\w+')
+    is_default=""
+    [ "$iface" = "$DEFAULT_WAN" ] && is_default="${GREEN}← default route${NC}"
+
+    printf "  %-12s %-20s %-18s %-8s " "$iface" "$mac" "$ip4" "$state"
+    echo -e "$is_default"
+
+    ETH_IFACES+=("$iface")
+done < <(ls /sys/class/net/)
+
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+if [ ${#ETH_IFACES[@]} -eq 0 ]; then
+    echo -e "${RED}✗ No physical ethernet interfaces found${NC}"
     exit 1
 fi
 
-echo "WAN interface: $WAN_IFACE"
+# ---- Prompt for WAN interface ----
+DEFAULT_PROMPT="${DEFAULT_WAN:-${ETH_IFACES[0]}}"
+read -r -p "  Select WAN interface [${DEFAULT_PROMPT}]: " WAN_IFACE
+WAN_IFACE="${WAN_IFACE:-$DEFAULT_PROMPT}"
+
+# Validate selection
+if ! ip link show "$WAN_IFACE" &>/dev/null; then
+    echo -e "${RED}✗ Interface '$WAN_IFACE' not found${NC}"
+    exit 1
+fi
+if ! ip link show "$WAN_IFACE" | grep -q 'link/ether'; then
+    echo -e "${RED}✗ '$WAN_IFACE' is not a physical ethernet interface${NC}"
+    exit 1
+fi
+
+# ---- Prompt for LAN interface ----
+echo ""
+read -r -p "  Select LAN interface (wired client port, or press Enter to skip): " LAN_IFACE_INPUT
+
+if [ -n "$LAN_IFACE_INPUT" ]; then
+    if [ "$LAN_IFACE_INPUT" = "$WAN_IFACE" ]; then
+        echo -e "${RED}✗ LAN interface cannot be the same as WAN interface - skipping LAN setup${NC}"
+        LAN_IFACE_INPUT=""
+    elif ! ip link show "$LAN_IFACE_INPUT" &>/dev/null; then
+        echo -e "${RED}✗ Interface '$LAN_IFACE_INPUT' not found - skipping LAN setup${NC}"
+        LAN_IFACE_INPUT=""
+    fi
+fi
+echo ""
+
+echo -e "${GREEN}WAN: $WAN_IFACE${NC}"
+[ -n "$LAN_IFACE_INPUT" ] && echo -e "${GREEN}LAN: $LAN_IFACE_INPUT${NC}" || echo -e "${YELLOW}LAN: none (WiFi hotspot only)${NC}"
+echo ""
+
+echo "Creating WAN bridge (br-wan)..."
 
 # Capture MAC and current IP before bridging (for reconnect info)
 WAN_MAC=$(ip link show "$WAN_IFACE" | awk '/ether/ {print $2}')
@@ -241,21 +296,14 @@ ETHNS_IP=$(ip netns exec ethns ip -4 addr show br0 | grep -oP '(?<=inet\s)\d+(\.
 [ -n "$ETHNS_IP" ] && echo -e "${GREEN}✓ ethns IP: $ETHNS_IP${NC}"
 
 # ---- Connect LAN ethernet interface to switchns ----
-# enp1s0 (LAN client port) moves to switchns so wired clients go through DNS filtering
-LAN_IFACE="${ETHERNET_INTERFACE:-}"
-
-if [ -z "$LAN_IFACE" ]; then
-    echo -e "${YELLOW}⚠ No LAN interface configured (ETHERNET_INTERFACE), skipping LAN setup${NC}"
+if [ -z "$LAN_IFACE_INPUT" ]; then
+    echo -e "${YELLOW}⚠ No LAN interface selected, skipping wired client port setup${NC}"
 else
-    if ip link show "$LAN_IFACE" &>/dev/null; then
-        echo "Moving LAN interface $LAN_IFACE to switchns..."
-        ip link set "$LAN_IFACE" netns switchns
-        ip netns exec switchns ip link set "$LAN_IFACE" up
-        ip netns exec switchns ip link set "$LAN_IFACE" master br-switch
-        echo -e "${GREEN}✓ $LAN_IFACE moved to switchns and added to br-switch${NC}"
-    else
-        echo -e "${YELLOW}⚠ Interface $LAN_IFACE not found, skipping${NC}"
-    fi
+    echo "Moving LAN interface $LAN_IFACE_INPUT to switchns..."
+    ip link set "$LAN_IFACE_INPUT" netns switchns
+    ip netns exec switchns ip link set "$LAN_IFACE_INPUT" up
+    ip netns exec switchns ip link set "$LAN_IFACE_INPUT" master br-switch
+    echo -e "${GREEN}✓ $LAN_IFACE_INPUT moved to switchns and added to br-switch${NC}"
 fi
 
 # DHCP for kidosns
