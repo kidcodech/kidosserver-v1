@@ -16,15 +16,9 @@ echo ""
 # Check if we have internet connectivity
 echo "Checking internet connectivity..."
 if ! ping -c 1 -W 2 8.8.8.8 &> /dev/null; then
-    echo "⚠ Warning: No internet connectivity detected!"
+    echo "⚠ Warning: No internet connectivity detected! Go/npm dependency downloads may fail."
     echo "If namespaces are currently active, run: sudo ./scripts/teardown.sh"
-    echo "This will restore your network interface to the default namespace."
     echo ""
-    read -p "Continue anyway? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
 fi
 echo ""
 

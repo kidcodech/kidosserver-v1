@@ -2080,6 +2080,43 @@ function App() {
                     </div>
                   </div>
 
+                  {/* Encrypted DNS Override */}
+                  <div className="user-section">
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
+                      <h3>🔐 Encrypted DNS</h3>
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={selectedUser.allow_encrypted_dns}
+                          onChange={async () => {
+                            try {
+                              const res = await fetch(`/api/users/${selectedUser.id}/encrypted-dns`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ allow_encrypted_dns: !selectedUser.allow_encrypted_dns })
+                              })
+                              if (res.ok) {
+                                await fetchUsers()
+                                const userRes = await fetch(`/api/users/${selectedUser.id}`)
+                                if (userRes.ok) {
+                                  const fullUser = await userRes.json()
+                                  setSelectedUser(fullUser)
+                                }
+                              }
+                            } catch (error) {
+                              console.error('Error toggling encrypted DNS:', error)
+                            }
+                          }}
+                        />
+                        <span className="slider round"></span>
+                      </label>
+                    </div>
+                    <p className="setting-description" style={{marginBottom: '1rem'}}>
+                      Allow this user's devices to use encrypted DNS (DoT/DoH/DoQ) even when global blocking is enabled. Useful for smart TVs or devices that require it.
+                      {selectedUser.allow_encrypted_dns ? <span style={{color: '#27ae60', fontWeight: 'bold', marginLeft: '0.5rem'}}>Currently Allowed</span> : <span style={{color: '#e74c3c', fontWeight: 'bold', marginLeft: '0.5rem'}}>Currently Blocked</span>}
+                    </p>
+                  </div>
+
                   {/* Blocked Domains Management */}
                   <div className="user-section">
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
