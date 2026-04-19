@@ -10,12 +10,13 @@ import (
 
 // User represents a family member being monitored
 type User struct {
-	ID             int       `json:"id"`
-	Username       string    `json:"username"`
-	DisplayName    string    `json:"display_name"`
-	EnableBlocking bool      `json:"enable_blocking"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                int       `json:"id"`
+	Username          string    `json:"username"`
+	DisplayName       string    `json:"display_name"`
+	EnableBlocking    bool      `json:"enable_blocking"`
+	AllowEncryptedDNS bool      `json:"allow_encrypted_dns"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // UserDevice represents a MAC address assigned to a user
@@ -54,7 +55,7 @@ type UserWithDevices struct {
 
 // GetAllUsers returns all users with their device MAC addresses
 func GetAllUsers() ([]UserWithDevices, error) {
-	rows, err := DB.Query("SELECT id, username, display_name, enable_blocking, created_at, updated_at FROM users ORDER BY username")
+	rows, err := DB.Query("SELECT id, username, display_name, enable_blocking, allow_encrypted_dns, created_at, updated_at FROM users ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +64,7 @@ func GetAllUsers() ([]UserWithDevices, error) {
 	var users []UserWithDevices
 	for rows.Next() {
 		var u UserWithDevices
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.AllowEncryptedDNS, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 
@@ -82,9 +83,9 @@ func GetAllUsers() ([]UserWithDevices, error) {
 func GetUserWithDevices(id int) (*UserWithDevices, error) {
 	var u UserWithDevices
 	err := DB.QueryRow(
-		"SELECT id, username, display_name, enable_blocking, created_at, updated_at FROM users WHERE id = ?",
+		"SELECT id, username, display_name, enable_blocking, allow_encrypted_dns, created_at, updated_at FROM users WHERE id = ?",
 		id,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.AllowEncryptedDNS, &u.CreatedAt, &u.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -126,9 +127,9 @@ func CreateUser(username, displayName, password string) (*User, error) {
 func GetUser(id int) (*User, error) {
 	var u User
 	err := DB.QueryRow(
-		"SELECT id, username, display_name, enable_blocking, created_at, updated_at FROM users WHERE id = ?",
+		"SELECT id, username, display_name, enable_blocking, allow_encrypted_dns, created_at, updated_at FROM users WHERE id = ?",
 		id,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.AllowEncryptedDNS, &u.CreatedAt, &u.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -232,11 +233,11 @@ func UpdateUserDevice(deviceID int, deviceName string) error {
 func GetUserByMAC(macAddress string) (*UserWithDevices, error) {
 	var u UserWithDevices
 	err := DB.QueryRow(`
-		SELECT u.id, u.username, u.display_name, u.created_at, u.updated_at
+		SELECT u.id, u.username, u.display_name, u.enable_blocking, u.allow_encrypted_dns, u.created_at, u.updated_at
 		FROM users u
 		JOIN user_devices dev ON u.id = dev.user_id
 		WHERE dev.mac_address = ?
-	`, macAddress).Scan(&u.ID, &u.Username, &u.DisplayName, &u.CreatedAt, &u.UpdatedAt)
+	`, macAddress).Scan(&u.ID, &u.Username, &u.DisplayName, &u.EnableBlocking, &u.AllowEncryptedDNS, &u.CreatedAt, &u.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -255,9 +256,9 @@ func AuthenticateUser(username, password string) (*User, error) {
 	var passwordHash string
 
 	err := DB.QueryRow(
-		"SELECT id, username, password_hash, display_name, enable_blocking, created_at, updated_at FROM users WHERE username = ?",
+		"SELECT id, username, password_hash, display_name, enable_blocking, allow_encrypted_dns, created_at, updated_at FROM users WHERE username = ?",
 		username,
-	).Scan(&u.ID, &u.Username, &passwordHash, &u.DisplayName, &u.EnableBlocking, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &passwordHash, &u.DisplayName, &u.EnableBlocking, &u.AllowEncryptedDNS, &u.CreatedAt, &u.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, err // User not found
@@ -272,6 +273,39 @@ func AuthenticateUser(username, password string) (*User, error) {
 	}
 
 	return &u, nil
+}
+
+// UpdateUserAllowEncryptedDNS toggles the allow_encrypted_dns flag for a user
+func UpdateUserAllowEncryptedDNS(userID int, allow bool) error {
+	_, err := DB.Exec(
+		"UPDATE users SET allow_encrypted_dns = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		allow, userID,
+	)
+	return err
+}
+
+// GetMACsAllowingEncryptedDNS returns all MAC addresses belonging to users who have allow_encrypted_dns=true
+func GetMACsAllowingEncryptedDNS() ([]string, error) {
+	rows, err := DB.Query(`
+		SELECT ud.mac_address
+		FROM user_devices ud
+		JOIN users u ON ud.user_id = u.id
+		WHERE u.allow_encrypted_dns = 1
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var macs []string
+	for rows.Next() {
+		var mac string
+		if err := rows.Scan(&mac); err != nil {
+			return nil, err
+		}
+		macs = append(macs, mac)
+	}
+	return macs, nil
 }
 
 // GetUserBlockedDomains returns all blocked domains for a user

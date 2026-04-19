@@ -33,6 +33,19 @@ function UserManagement() {
     }
   }
 
+  const toggleEncryptedDNS = async (user) => {
+    try {
+      await fetch(`/api/users/${user.id}/encrypted-dns`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allow_encrypted_dns: !user.allow_encrypted_dns })
+      })
+      fetchUsers()
+    } catch (error) {
+      console.error('Error toggling encrypted DNS:', error)
+    }
+  }
+
   return (
     <div>
       <div className="controls">
@@ -65,13 +78,14 @@ function UserManagement() {
               <th>Display Name</th>
               <th>Devices</th>
               <th>MAC Addresses</th>
+              <th>Encrypted DNS</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {users.length === 0 ? (
               <tr>
-                <td colSpan="5" className="no-data">No users configured yet</td>
+                <td colSpan="6" className="no-data">No users configured yet</td>
               </tr>
             ) : (
               users.map(user => (
@@ -93,6 +107,15 @@ function UserManagement() {
                         <span className="no-ips">No MACs assigned</span>
                       )}
                     </div>
+                  </td>
+                  <td>
+                    <button
+                      onClick={() => toggleEncryptedDNS(user)}
+                      className={`btn btn-small ${user.allow_encrypted_dns ? 'btn-success' : 'btn-danger'}`}
+                      title={user.allow_encrypted_dns ? 'Encrypted DNS allowed (click to block)' : 'Encrypted DNS blocked (click to allow)'}
+                    >
+                      {user.allow_encrypted_dns ? '🔓 Allowed' : '🔒 Blocked'}
+                    </button>
                   </td>
                   <td>
                     <div className="action-buttons">

@@ -26,13 +26,14 @@ const (
 )
 
 var (
-	allowedMACsMap    *ebpf.Map
-	droppedMACsMap    *ebpf.Map
-	statsMap          *ebpf.Map
-	globalSettingsMap *ebpf.Map
-	xsksMap           *ebpf.Map
-	dohIPListMap      *ebpf.Map
-	eventsMap         *ebpf.Map
+	allowedMACsMap             *ebpf.Map
+	droppedMACsMap             *ebpf.Map
+	statsMap                   *ebpf.Map
+	globalSettingsMap          *ebpf.Map
+	xsksMap                    *ebpf.Map
+	dohIPListMap               *ebpf.Map
+	eventsMap                  *ebpf.Map
+	allowedEncryptedDNSMACsMap *ebpf.Map
 )
 
 // EncryptedDNSEvent matches the C struct
@@ -80,6 +81,9 @@ func main() {
 	if err := syncDoHIPsFromDatabase(); err != nil {
 		log.Printf("Initial DoH IP sync failed: %v", err)
 	}
+	if err := syncEncryptedDNSAllowListFromDatabase(); err != nil {
+		log.Printf("Initial encrypted DNS allow-list sync failed: %v", err)
+	}
 
 	// Setup signal handler for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -105,6 +109,9 @@ func main() {
 			}
 			if err := syncDoHIPsFromDatabase(); err != nil {
 				log.Printf("DoH IP sync error: %v", err)
+			}
+			if err := syncEncryptedDNSAllowListFromDatabase(); err != nil {
+				log.Printf("Encrypted DNS allow-list sync error: %v", err)
 			}
 		case <-sigChan:
 			log.Println("Shutting down...")
@@ -228,6 +235,10 @@ func findLoadedMaps() error {
 			eventsMap = m
 			log.Printf("Found events map (ID: %d)", mapID)
 		}
+		if info.Name == "allowed_encrypted_dns_macs" {
+			allowedEncryptedDNSMACsMap = m
+			log.Printf("Found allowed_encrypted_dns_macs map (ID: %d)", mapID)
+		}
 	}
 
 	if allowedMACsMap == nil {
@@ -244,6 +255,9 @@ func findLoadedMaps() error {
 	}
 	if dohIPListMap == nil {
 		log.Println("⚠ doh_ip_list map not found - DoH blocking may not work")
+	}
+	if allowedEncryptedDNSMACsMap == nil {
+		log.Println("⚠ allowed_encrypted_dns_macs map not found - per-user encrypted DNS override will not work")
 	}
 
 	return nil
@@ -500,6 +514,61 @@ func syncMACsFromDatabase() error {
 
 	// Log stats
 	printStats()
+
+	return nil
+}
+
+// syncEncryptedDNSAllowListFromDatabase syncs the per-user encrypted DNS allow-list to the eBPF map
+func syncEncryptedDNSAllowListFromDatabase() error {
+	if allowedEncryptedDNSMACsMap == nil {
+		return nil
+	}
+
+	macs, err := db.GetMACsAllowingEncryptedDNS()
+	if err != nil {
+		return fmt.Errorf("failed to get encrypted DNS allow-list: %w", err)
+	}
+
+	// Build desired set
+	desired := make(map[string]bool)
+	for _, mac := range macs {
+		desired[mac] = true
+	}
+
+	// Get current map contents
+	var key [6]byte
+	var val uint32
+	iter := allowedEncryptedDNSMACsMap.Iterate()
+	var toDelete [][6]byte
+	for iter.Next(&key, &val) {
+		macStr := macToString(key[:])
+		if !desired[macStr] {
+			k := key
+			toDelete = append(toDelete, k)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		log.Printf("Error iterating allowed_encrypted_dns_macs map: %v", err)
+	}
+	for _, k := range toDelete {
+		k := k
+		if err := allowedEncryptedDNSMACsMap.Delete(&k); err != nil {
+			log.Printf("Failed to delete from allowed_encrypted_dns_macs: %v", err)
+		}
+	}
+
+	// Add missing entries
+	for macStr := range desired {
+		macBytes, err := macToBytes(macStr)
+		if err != nil {
+			log.Printf("Invalid MAC %s: %v", macStr, err)
+			continue
+		}
+		v := uint32(1)
+		if err := allowedEncryptedDNSMACsMap.Put(macBytes, &v); err != nil {
+			log.Printf("Failed to add MAC to allowed_encrypted_dns_macs: %v", err)
+		}
+	}
 
 	return nil
 }

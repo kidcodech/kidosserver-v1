@@ -142,6 +142,7 @@ func main() {
 	router.HandleFunc("/api/users/{id}", updateUser).Methods("PUT")
 	router.HandleFunc("/api/users/{id}", deleteUser).Methods("DELETE")
 	router.HandleFunc("/api/users/{id}/blocking", toggleUserBlocking).Methods("PUT")
+	router.HandleFunc("/api/users/{id}/encrypted-dns", toggleUserEncryptedDNS).Methods("PUT")
 	router.HandleFunc("/api/users/{id}/devices", getUserDevices).Methods("GET")
 	router.HandleFunc("/api/users/{id}/devices", addUserDevice).Methods("POST")
 	router.HandleFunc("/api/users/{id}/devices/{device_id}", updateUserDevice).Methods("PUT")
@@ -1760,6 +1761,33 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// toggleUserEncryptedDNS toggles the allow_encrypted_dns flag for a user
+func toggleUserEncryptedDNS(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		AllowEncryptedDNS bool `json:"allow_encrypted_dns"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.UpdateUserAllowEncryptedDNS(id, req.AllowEncryptedDNS); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update setting: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	user, _ := db.GetUser(id)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
 }
 
 // toggleUserBlocking toggles the enable_blocking flag for a user
