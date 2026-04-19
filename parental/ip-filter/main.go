@@ -41,6 +41,7 @@ type EncryptedDNSEvent struct {
 	SrcIP    uint32
 	DestIP   uint32
 	Protocol uint32
+	Blocked  uint32 // 1=blocked, 0=allowed
 }
 
 func main() {
@@ -614,9 +615,8 @@ func processEvents() {
 		}
 
 		var event EncryptedDNSEvent
-		if len(record.RawSample) < 20 { // 6 + 4 + 4 + 4 = 18 bytes, padded to 20?
-			// Struct size: 6 (mac) + 2 (pad) + 4 (src) + 4 (dst) + 4 (proto) = 20 bytes
-			// Let's just check minimum size
+		if len(record.RawSample) < 20 { // 6 + 4 + 4 + 4 + 4 = 22 bytes min (padded to 24)
+			// Struct size: 6 (mac) + 2 (pad) + 4 (src) + 4 (dst) + 4 (proto) + 4 (blocked) = 24 bytes
 			if len(record.RawSample) < 18 {
 				continue
 			}
@@ -628,6 +628,9 @@ func processEvents() {
 		event.SrcIP = binary.LittleEndian.Uint32(record.RawSample[8:12])
 		event.DestIP = binary.LittleEndian.Uint32(record.RawSample[12:16])
 		event.Protocol = binary.LittleEndian.Uint32(record.RawSample[16:20])
+		if len(record.RawSample) >= 24 {
+			event.Blocked = binary.LittleEndian.Uint32(record.RawSample[20:24])
+		}
 
 		macStr := macToString(event.MAC[:])
 		destIP := intToIP(event.DestIP).String()
@@ -675,10 +678,16 @@ func processEvents() {
 			deviceName = "Unknown Device"
 		}
 
-		log.Printf("Blocked %s from %s (%s) to %s", protocol, macStr, deviceName, destIP)
-
-		if err := db.LogBlockedEncryptedDNS(macStr, deviceName, srcIP, userID, userName, destIP, protocol); err != nil {
-			log.Printf("Failed to log blocked encrypted DNS: %v", err)
+		if event.Blocked == 1 {
+			log.Printf("Blocked %s from %s (%s) to %s", protocol, macStr, deviceName, destIP)
+			if err := db.LogBlockedEncryptedDNS(macStr, deviceName, srcIP, userID, userName, destIP, protocol); err != nil {
+				log.Printf("Failed to log blocked encrypted DNS: %v", err)
+			}
+		} else {
+			log.Printf("Allowed %s from %s (%s) to %s", protocol, macStr, deviceName, destIP)
+			if err := db.LogAllowedEncryptedDNS(macStr, deviceName, srcIP, userID, userName, destIP, protocol); err != nil {
+				log.Printf("Failed to log allowed encrypted DNS: %v", err)
+			}
 		}
 	}
 }

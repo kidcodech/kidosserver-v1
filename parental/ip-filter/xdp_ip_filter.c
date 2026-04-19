@@ -91,12 +91,13 @@ struct {
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } doh_ip_list SEC(".maps");
 
-// Event structure for blocked encrypted DNS
+// Event structure for encrypted DNS (both blocked and allowed)
 struct encrypted_dns_event {
     __u8 mac[6];
     __u32 src_ip;
     __u32 dest_ip;
     __u32 protocol; // 0=DoT, 1=DoH, 2=DoQ
+    __u32 blocked;  // 1=blocked, 0=allowed
 };
 
 // Perf event map for logging
@@ -147,18 +148,20 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
         if (tcp->dest == bpf_htons(853)) {
             __u32 key = 0;
             __u32 *allow_dot = bpf_map_lookup_elem(&global_settings, &key);
-            
+
+            struct encrypted_dns_event evt = {};
+            __builtin_memcpy(evt.mac, src_mac.addr, 6);
+            evt.src_ip = ip->saddr;
+            evt.dest_ip = ip->daddr;
+            evt.protocol = 0; // DoT
+
             // If map entry exists and value is 1, allow. Otherwise (0 or null), block.
             if (allow_dot && *allow_dot == 1) {
-                // Allow DoT
-            } else {
-                struct encrypted_dns_event evt = {};
-                __builtin_memcpy(evt.mac, src_mac.addr, 6);
-                evt.src_ip = ip->saddr;
-                evt.dest_ip = ip->daddr;
-                evt.protocol = 0; // DoT
+                evt.blocked = 0; // Allowed
                 bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
-                
+            } else {
+                evt.blocked = 1; // Blocked
+                bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
                 return XDP_DROP; // Block DoT
             }
         }
@@ -167,23 +170,27 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
         if (tcp->dest == bpf_htons(443)) {
             __u32 key = 1; // block_doh setting
             __u32 *allow_doh = bpf_map_lookup_elem(&global_settings, &key);
-            
-            // If allow_doh is 0 (default/blocked), check the IP list
-            if (!allow_doh || *allow_doh == 0) {
-                struct ipv4_lpm_key ip_key;
-                ip_key.prefixlen = 32; // Lookup with full length
-                ip_key.data = ip->daddr;
-                
-                __u32 *val = bpf_map_lookup_elem(&doh_ip_list, &ip_key);
-                if (val) {
-                    struct encrypted_dns_event evt = {};
-                    __builtin_memcpy(evt.mac, src_mac.addr, 6);
-                    evt.src_ip = ip->saddr;
-                    evt.dest_ip = ip->daddr;
-                    evt.protocol = 1; // DoH
-                    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
 
+            // Only act on known DoH IPs (from doh_ip_list)
+            struct ipv4_lpm_key ip_key;
+            ip_key.prefixlen = 32;
+            ip_key.data = ip->daddr;
+
+            __u32 *val = bpf_map_lookup_elem(&doh_ip_list, &ip_key);
+            if (val) {
+                struct encrypted_dns_event evt = {};
+                __builtin_memcpy(evt.mac, src_mac.addr, 6);
+                evt.src_ip = ip->saddr;
+                evt.dest_ip = ip->daddr;
+                evt.protocol = 1; // DoH
+
+                if (!allow_doh || *allow_doh == 0) {
+                    evt.blocked = 1; // Blocked
+                    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
                     return XDP_DROP; // Block DoH IP
+                } else {
+                    evt.blocked = 0; // Allowed
+                    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
                 }
             }
         }
@@ -206,18 +213,20 @@ int xdp_mac_filter_prog(struct xdp_md *ctx)
         if (udp->dest == bpf_htons(853) || udp->dest == bpf_htons(784)) {
             __u32 key = 2; // block_doq setting
             __u32 *allow_doq = bpf_map_lookup_elem(&global_settings, &key);
-            
+
+            struct encrypted_dns_event evt = {};
+            __builtin_memcpy(evt.mac, src_mac.addr, 6);
+            evt.src_ip = ip->saddr;
+            evt.dest_ip = ip->daddr;
+            evt.protocol = 2; // DoQ
+
             // If map entry exists and value is 1, allow. Otherwise (0 or null), block.
             if (allow_doq && *allow_doq == 1) {
-                // Allow DoQ
-            } else {
-                struct encrypted_dns_event evt = {};
-                __builtin_memcpy(evt.mac, src_mac.addr, 6);
-                evt.src_ip = ip->saddr;
-                evt.dest_ip = ip->daddr;
-                evt.protocol = 2; // DoQ
+                evt.blocked = 0; // Allowed
                 bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
-
+            } else {
+                evt.blocked = 1; // Blocked
+                bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
                 return XDP_DROP; // Block DoQ
             }
         }

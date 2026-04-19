@@ -204,6 +204,7 @@ function App() {
   const [newDomain, setNewDomain] = useState('')
   const [blockedLogs, setBlockedLogs] = useState([])
   const [encryptedDNSLogs, setEncryptedDNSLogs] = useState([])
+  const [allowedEncryptedDNSLogs, setAllowedEncryptedDNSLogs] = useState([])
   // Default to today's date in local time
   const [logFilterDate, setLogFilterDate] = useState(() => {
     const now = new Date()
@@ -603,6 +604,8 @@ function App() {
         fetchDNSRequests()
       } else if (logsSubTab === 'encrypted') {
         fetchEncryptedDNSLogs()
+      } else if (logsSubTab === 'allowed-encrypted') {
+        fetchAllowedEncryptedDNSLogs()
       }
     }
   }, [activeTab, logsSubTab, logFilterDate, logFilterType, logFilterValue])
@@ -730,6 +733,22 @@ function App() {
       }
     } catch (error) {
       console.error('Error clearing encrypted DNS logs:', error)
+    }
+  }
+
+  const clearAllowedEncryptedDNSLogs = async () => {
+    if (!confirm('Are you sure you want to clear all allowed encrypted DNS logs?')) {
+      return
+    }
+    try {
+      const response = await fetch('/api/logs/allowed-encrypted-dns', {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        setAllowedEncryptedDNSLogs([])
+      }
+    } catch (error) {
+      console.error('Error clearing allowed encrypted DNS logs:', error)
     }
   }
 
@@ -1134,6 +1153,25 @@ function App() {
     }
   }
 
+  const fetchAllowedEncryptedDNSLogs = async () => {
+    try {
+      let url = '/api/logs/allowed-encrypted-dns?'
+      const dateParam = logFilterDate || new Date().toLocaleDateString('en-CA')
+      url += `date=${dateParam}&`
+
+      if (logFilterType === 'user' && logFilterValue) url += `user_id=${logFilterValue}&`
+      if (logFilterType === 'device' && logFilterValue) url += `device_mac=${logFilterValue}&`
+
+      const response = await fetch(url)
+      if (response.ok) {
+        const data = await response.json()
+        setAllowedEncryptedDNSLogs(data || [])
+      }
+    } catch (error) {
+      console.error('Error fetching allowed encrypted DNS logs:', error)
+    }
+  }
+
   return (
     <div className="App">
       <aside className="sidebar">
@@ -1380,16 +1418,22 @@ function App() {
                 🚫 Blocked Domains
               </button>
               <button 
-                className={`user-tab ${logsSubTab === 'encrypted' ? 'active' : ''}`}
-                onClick={() => setLogsSubTab('encrypted')}
-              >
-                🔒 Encrypted DNS
-              </button>
-              <button 
                 className={`user-tab ${logsSubTab === 'dns' ? 'active' : ''}`}
                 onClick={() => setLogsSubTab('dns')}
               >
-                🌐 DNS Requests
+                ✅ Allowed Domains
+              </button>
+              <button 
+                className={`user-tab ${logsSubTab === 'encrypted' ? 'active' : ''}`}
+                onClick={() => setLogsSubTab('encrypted')}
+              >
+                🔒 Blocked Encrypted DNS
+              </button>
+              <button 
+                className={`user-tab ${logsSubTab === 'allowed-encrypted' ? 'active' : ''}`}
+                onClick={() => setLogsSubTab('allowed-encrypted')}
+              >
+                🔓 Allowed Encrypted DNS
               </button>
             </div>
           </div>
@@ -1697,7 +1741,7 @@ function App() {
 
               <div className="stats-summary">
                 <div className="stat-card">
-                  <h3>Total Encrypted DNS Blocks</h3>
+                  <h3>Total Blocked Encrypted DNS</h3>
                   <p className="stat-value">{encryptedDNSLogs.length}</p>
                 </div>
               </div>
@@ -1724,6 +1768,119 @@ function App() {
                       encryptedDNSLogs.map((log, idx) => (
                         <tr key={idx}>
                           <td>{new Date(log.blocked_at).toLocaleString()}</td>
+                          <td className="domain-name">{log.dns_server_ip}</td>
+                          <td>
+                            <span className="protocol protocol-tcp">{log.protocol}</span>
+                          </td>
+                          <td>{log.user_name || '-'}</td>
+                          <td>{log.device_name || '-'}</td>
+                          <td className="ip-address">{log.device_ip || '-'}</td>
+                          <td className="ip-address">{log.device_mac}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {logsSubTab === 'allowed-encrypted' && (
+            <>
+              <div className="controls">
+                <div className="log-filters">
+                  <input 
+                    type="date" 
+                    value={logFilterDate}
+                    onChange={(e) => setLogFilterDate(e.target.value)}
+                    className="filter-input"
+                    placeholder="Filter by date"
+                  />
+                  <select 
+                    value={logFilterType}
+                    onChange={(e) => {
+                      setLogFilterType(e.target.value)
+                      setLogFilterValue('')
+                    }}
+                    className="filter-input"
+                  >
+                    <option value="">All Entries</option>
+                    <option value="user">Filter by User</option>
+                    <option value="device">Filter by Device</option>
+                  </select>
+                  {logFilterType === 'user' && (
+                    <select 
+                      value={logFilterValue}
+                      onChange={(e) => setLogFilterValue(e.target.value)}
+                      className="filter-input"
+                    >
+                      <option value="">Select User</option>
+                      {users.map(user => (
+                        <option key={user.id} value={user.id}>
+                          {user.display_name} ({user.username})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {logFilterType === 'device' && (
+                    <select 
+                      value={logFilterValue}
+                      onChange={(e) => setLogFilterValue(e.target.value)}
+                      className="filter-input"
+                    >
+                      <option value="">Select Device</option>
+                      {users.flatMap(user => 
+                        (user.devices || []).map(device => ({
+                          mac: device.mac_address,
+                          name: `${device.device_name || 'Unnamed'} (${user.display_name})`
+                        }))
+                      ).map((device, idx) => (
+                        <option key={idx} value={device.mac}>
+                          {device.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div style={{display: 'flex', gap: '10px'}}>
+                  <button onClick={fetchAllowedEncryptedDNSLogs} className="btn btn-primary">
+                    🔄 Refresh
+                  </button>
+                  <button onClick={clearAllowedEncryptedDNSLogs} className="btn btn-danger">
+                    🗑️ Clear All
+                  </button>
+                </div>
+              </div>
+
+              <div className="stats-summary">
+                <div className="stat-card">
+                  <h3>Total Allowed Encrypted DNS</h3>
+                  <p className="stat-value">{allowedEncryptedDNSLogs.length}</p>
+                </div>
+              </div>
+
+              <div className="packet-table-container">
+                <table className="packet-table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>DNS Server IP</th>
+                      <th>Type</th>
+                      <th>User</th>
+                      <th>Device</th>
+                      <th>Device IP</th>
+                      <th>MAC Address</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allowedEncryptedDNSLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="no-data">No allowed encrypted DNS connections captured yet</td>
+                      </tr>
+                    ) : (
+                      allowedEncryptedDNSLogs.map((log, idx) => (
+                        <tr key={idx}>
+                          <td>{new Date(log.allowed_at).toLocaleString()}</td>
                           <td className="domain-name">{log.dns_server_ip}</td>
                           <td>
                             <span className="protocol protocol-tcp">{log.protocol}</span>

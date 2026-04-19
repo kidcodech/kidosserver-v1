@@ -136,6 +136,19 @@ func runMigrations() error {
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS allowed_encrypted_dns_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		device_mac TEXT NOT NULL,
+		device_name TEXT,
+		device_ip TEXT,
+		user_id INTEGER,
+		user_name TEXT,
+		dns_server_ip TEXT NOT NULL,
+		protocol TEXT NOT NULL,
+		allowed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_user_devices_mac ON user_devices(mac_address);
 	CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_domains_user_id ON user_blocked_domains(user_id);
@@ -145,6 +158,7 @@ func runMigrations() error {
 	CREATE INDEX IF NOT EXISTS idx_blocked_logs_user ON blocked_domain_logs(user_id);
 	CREATE INDEX IF NOT EXISTS idx_blocked_logs_device ON blocked_domain_logs(device_mac);
 	CREATE INDEX IF NOT EXISTS idx_encrypted_logs_date ON blocked_encrypted_dns_logs(blocked_at);
+	CREATE INDEX IF NOT EXISTS idx_allowed_encrypted_logs_date ON allowed_encrypted_dns_logs(allowed_at);
 	`
 
 	_, err := DB.Exec(schema)
@@ -162,6 +176,20 @@ func runMigrations() error {
 
 	// Migration: Add device_ip column to blocked_encrypted_dns_logs if it doesn't exist
 	DB.Exec("ALTER TABLE blocked_encrypted_dns_logs ADD COLUMN device_ip TEXT")
+
+	// Migration: Create allowed_encrypted_dns_logs for existing databases
+	DB.Exec(`CREATE TABLE IF NOT EXISTS allowed_encrypted_dns_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		device_mac TEXT NOT NULL,
+		device_name TEXT,
+		device_ip TEXT,
+		user_id INTEGER,
+		user_name TEXT,
+		dns_server_ip TEXT NOT NULL,
+		protocol TEXT NOT NULL,
+		allowed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+	)`)
 
 	// Migration: Add enable_blocking column to users if it doesn't exist
 	DB.Exec("ALTER TABLE users ADD COLUMN enable_blocking BOOLEAN DEFAULT 1")
