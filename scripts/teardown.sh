@@ -75,7 +75,9 @@ for ns in switchns ethns; do
     for iface in $PHYS; do
         echo "  Moving $iface from $ns -> root"
         ip netns exec "$ns" ip link set "$iface" netns 1 2>/dev/null || true
+        sleep 1
         ip link set "$iface" up 2>/dev/null || true
+        nmcli device set "$iface" managed yes 2>/dev/null || true
         nmcli device connect "$iface" 2>/dev/null || dhclient "$iface" 2>/dev/null &
         echo "  Handed $iface back to NetworkManager"
     done
@@ -96,6 +98,14 @@ done
 # ---- Clean up any leftover root-ns veth interfaces ----
 for iface in veth-mgmt veth-root; do
     ip link del "$iface" 2>/dev/null || true
+done
+
+# ---- Return all physical interfaces to NetworkManager ----
+echo "Returning all physical interfaces to NetworkManager..."
+for iface in $(ip -o link show | awk -F': ' '{print $2}' | grep -E '^(en|eth|wl)' | sed 's/@.*//'); do
+    echo "  Setting $iface managed..."
+    nmcli device set "$iface" managed yes 2>/dev/null || true
+    nmcli device connect "$iface" 2>/dev/null || true
 done
 
 echo "Teardown complete!"
